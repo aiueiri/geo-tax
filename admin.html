@@ -156,6 +156,8 @@
     <button class="tab-btn" data-tab="tab-trial" onclick="switchTab('tab-trial')">試算表</button>
     <button class="tab-btn" data-tab="tab-pl" onclick="switchTab('tab-pl')">損益計算書</button>
     <button class="tab-btn" data-tab="tab-bs" onclick="switchTab('tab-bs')">貸借対照表</button>
+    <button class="tab-btn" data-tab="tab-tax" onclick="switchTab('tab-tax')">消費税</button>
+    <button class="tab-btn" data-tab="tab-payroll" onclick="switchTab('tab-payroll')">給与明細</button>
     <button class="tab-btn" data-tab="tab-accounts" onclick="switchTab('tab-accounts')">科目設定</button>
   </nav>
 
@@ -309,6 +311,118 @@
       </div>
     </div>
 
+    <!-- 消費税タブ -->
+    <div class="tab-panel" id="tab-tax">
+      <div class="card">
+        <h3>消費税の設定</h3>
+        <p class="hint">各仕訳の行に付けた「税区分」(課税10%・課税8%・非課税)をもとに、税込金額から消費税額を割り出して計算します。実際に課税事業者かどうか・どちらの方式で申告するかは、税務署への届出内容に従ってください。</p>
+        <div class="form-row">
+          <label>課税事業者ですか?
+            <select id="taxIsTaxable" onchange="saveTaxSettings()">
+              <option value="unknown">わからない・未設定</option>
+              <option value="yes">課税事業者(消費税の申告が必要)</option>
+              <option value="no">免税事業者(消費税の申告は不要)</option>
+            </select>
+          </label>
+          <label>計算方式
+            <select id="taxMethod" onchange="saveTaxSettings(); renderTaxCalc();">
+              <option value="general">本則課税(実際の課税売上・課税仕入から計算)</option>
+              <option value="simplified">簡易課税(みなし仕入率を使用)</option>
+            </select>
+          </label>
+          <label>簡易課税の事業区分
+            <select id="taxSimplifiedCategory" onchange="saveTaxSettings(); renderTaxCalc();">
+              <option value="1">第一種(卸売業)みなし仕入率90%</option>
+              <option value="2">第二種(小売業)みなし仕入率80%</option>
+              <option value="3">第三種(製造業等)みなし仕入率70%</option>
+              <option value="4">第四種(その他・飲食店等)みなし仕入率60%</option>
+              <option value="5">第五種(サービス業等)みなし仕入率50%</option>
+              <option value="6">第六種(不動産業)みなし仕入率40%</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0;flex:1;">消費税額の計算</h3>
+          <label>会計年度:</label>
+          <select id="taxYearSelect" onchange="renderTaxCalc()"></select>
+        </div>
+        <div id="taxCalcArea"></div>
+      </div>
+    </div>
+
+    <!-- 給与明細タブ -->
+    <div class="tab-panel" id="tab-payroll">
+      <div class="card">
+        <h3>従業員・役員</h3>
+        <div class="form-row">
+          <label>氏名<input type="text" id="newEmployeeName"></label>
+          <label>役職
+            <select id="newEmployeeRole"><option value="staff">従業員</option><option value="officer">役員</option></select>
+          </label>
+        </div>
+        <button class="btn-primary" onclick="addEmployee()">追加</button>
+        <div class="table-wrap" style="margin-top:14px;"><table id="employeeTable"></table></div>
+      </div>
+
+      <div class="card">
+        <h3 id="payslipFormTitle">給与明細を作成</h3>
+        <div class="form-row">
+          <label>従業員<select id="payslipEmployeeSelect"></select></label>
+          <label>対象年月<input type="month" id="payslipYearMonth"></label>
+          <label>支給日<input type="date" id="payslipPayDate"></label>
+        </div>
+        <div class="form-row">
+          <div class="lines-box debit" style="flex:1;min-width:280px;">
+            <div class="lines-box-head"><span>支給項目</span><span id="paySumTotal">¥0</span></div>
+            <div id="payLinesArea"></div>
+            <button class="add-line-btn" onclick="addPayLine('pay')">＋ 項目を追加</button>
+          </div>
+          <div class="lines-box credit" style="flex:1;min-width:280px;">
+            <div class="lines-box-head"><span>控除項目</span><span id="deductSumTotal">¥0</span></div>
+            <div id="deductLinesArea"></div>
+            <button class="add-line-btn" onclick="addPayLine('deduct')">＋ 項目を追加</button>
+          </div>
+        </div>
+        <p class="hint">社会保険料・所得税・住民税の金額は、公式の保険料額表・源泉徴収税額表に基づいて入力してください(このアプリでは自動計算していません)。</p>
+        <div class="balance-indicator balance-ok" id="netPayIndicator">差引支給額: ¥0</div>
+        <div class="form-row" style="margin-top:14px;">
+          <label>仕訳作成: 支給科目<select id="paySourceAccountSelect"></select></label>
+          <label>預り金科目<select id="payDepositAccountSelect"></select></label>
+          <label>支払口座<select id="payPaymentAccountSelect"></select></label>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:10px;">
+          <button class="btn-primary" onclick="savePayslip()">この明細を保存</button>
+          <button class="btn-outline" onclick="loadPayslipToJournal()">仕訳入力に読み込む</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0;flex:1;">給与台帳</h3>
+          <label>従業員:</label>
+          <select id="ledgerEmployeeFilter" onchange="renderPayslipLedger()"></select>
+          <label>年:</label>
+          <select id="ledgerPayrollYearFilter" onchange="renderPayslipLedger()"></select>
+        </div>
+        <div class="table-wrap"><table id="payslipLedgerTable"></table></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0;flex:1;">源泉徴収票(簡易集計)</h3>
+          <label>従業員:</label>
+          <select id="withholdingEmployeeSelect"></select>
+          <label>年:</label>
+          <select id="withholdingYearSelect"></select>
+          <button class="btn-outline btn-sm" onclick="renderWithholdingSlip()">集計する</button>
+        </div>
+        <p class="hint">保存済みの給与明細(控除項目のうち「所得税」「健康保険」「厚生年金」「雇用保険」というラベルの行)から1年分を自動集計した簡易版です。生命保険料控除などを反映した正式な年末調整・源泉徴収票の作成には、別途調整が必要です。</p>
+        <div id="withholdingArea"></div>
+      </div>
+    </div>
+
     <!-- 科目設定タブ -->
     <div class="tab-panel" id="tab-accounts">
       <div class="card">
@@ -384,6 +498,9 @@ let currentUser = null;
 let accounts = [];   // {id, name, category}
 let entries = [];    // {id, date, fiscalYear, description, debitLines:[{accountId,amount}], creditLines:[{accountId,amount}]}
 let unsubAccounts = null, unsubEntries = null;
+let employees = [];
+let payslips = [];
+let unsubEmployees = null, unsubPayslips = null;
 let pendingImportRows = [];
 let editingEntryId = null;
 let fiscalYearManuallyEdited = false;
@@ -436,7 +553,9 @@ auth.onAuthStateChanged(user=>{
     currentUser = null;
     if(unsubAccounts) unsubAccounts();
     if(unsubEntries) unsubEntries();
-    accounts = []; entries = [];
+    if(unsubEmployees) unsubEmployees();
+    if(unsubPayslips) unsubPayslips();
+    accounts = []; entries = []; employees = []; payslips = [];
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('appScreen').style.display = 'none';
   }
@@ -477,7 +596,30 @@ function startListeners(){
       onLedgerAccountChange();
       renderJournal();
       renderBankAccountSelect();
+      renderPayrollAccountSelects();
+      renderTaxCalc();
     });
+
+  unsubEmployees = userDoc().collection('employees').orderBy('name')
+    .onSnapshot(snap=>{
+      employees = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderEmployeeTable();
+      renderEmployeeSelects();
+    });
+
+  unsubPayslips = userDoc().collection('payslips').orderBy('yearMonth')
+    .onSnapshot(snap=>{
+      payslips = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderPayslipLedger();
+    });
+
+  userDoc().collection('meta').doc('taxSettings').get().then(snap=>{
+    const s = snap.exists ? snap.data() : {};
+    document.getElementById('taxIsTaxable').value = s.isTaxable || 'unknown';
+    document.getElementById('taxMethod').value = s.method || 'general';
+    document.getElementById('taxSimplifiedCategory').value = s.simplifiedCategory || '6';
+    renderTaxCalc();
+  });
 
   unsubEntries = userDoc().collection('entries').orderBy('date')
     .onSnapshot(snap=>{
@@ -489,6 +631,7 @@ function startListeners(){
       renderPL();
       renderBalanceSheet();
       renderAccountDuplicates();
+      renderTaxCalc();
     });
 }
 
@@ -664,7 +807,7 @@ function onDateChange(){
 }
 
 function addLine(side){
-  const line = { tempId: ++lineIdCounter, accountId:'', amount:'', tag:'' };
+  const line = { tempId: ++lineIdCounter, accountId:'', amount:'', tag:'', taxType:'' };
   (side==='debit'?debitFormLines:creditFormLines).push(line);
   side==='debit' ? renderDebitLines() : renderCreditLines();
 }
@@ -685,11 +828,18 @@ function updateLineField(side, tempId, field, value){
   if(line){ line[field] = value; }
   recalcTotals();
 }
+const TAX_TYPE_LABEL = {'':'税区分:対象外/未設定', '10':'課税10%', '8':'課税8%(軽減)', 'exempt':'非課税'};
+function taxTypeSelectHtml(side, tempId, current){
+  return `<select onchange="updateLineField('${side}',${tempId},'taxType',this.value)">` +
+    Object.entries(TAX_TYPE_LABEL).map(([v,label])=>`<option value="${v}" ${v===(current||'')?'selected':''}>${label}</option>`).join('') +
+    `</select>`;
+}
 function lineRowHtml(side, line){
   return `<div class="line-row">
     <select onchange="updateLineField('${side}',${line.tempId},'accountId',this.value)">${accountOptionsHtml(line.accountId)}</select>
     <input type="number" min="0" placeholder="金額" value="${line.amount}" oninput="updateLineField('${side}',${line.tempId},'amount',this.value)">
     <input type="text" class="tag-input" placeholder="補助(任意)" value="${escapeHtml(line.tag||'')}" oninput="updateLineField('${side}',${line.tempId},'tag',this.value)">
+    ${taxTypeSelectHtml(side, line.tempId, line.taxType)}
     <button onclick="removeLine('${side}',${line.tempId})">✕</button>
   </div>`;
 }
@@ -725,8 +875,8 @@ function resetEntryForm(){
   document.getElementById('entryDate').valueAsDate = new Date();
   document.getElementById('entryFiscalYear').value = new Date().getFullYear();
   document.getElementById('entryDesc').value = '';
-  debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:''}];
-  creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:''}];
+  debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
+  creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
   renderDebitLines(); renderCreditLines();
   document.getElementById('entryFormTitle').textContent = '仕訳を入力';
   document.getElementById('saveEntryBtn').textContent = 'この仕訳を登録';
@@ -740,8 +890,8 @@ function loadEntryIntoForm(entry, isCopy){
   document.getElementById('entryDate').value = isCopy ? new Date().toISOString().slice(0,10) : entry.date;
   document.getElementById('entryFiscalYear').value = entry.fiscalYear || entry.date.slice(0,4);
   document.getElementById('entryDesc').value = entry.description || '';
-  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||''}));
-  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||''}));
+  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', taxType:l.taxType||''}));
+  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', taxType:l.taxType||''}));
   renderDebitLines(); renderCreditLines();
   document.getElementById('entryFormTitle').textContent = isCopy ? '仕訳を複製して登録' : '仕訳を編集';
   document.getElementById('saveEntryBtn').textContent = isCopy ? 'この仕訳を新規登録' : '更新する';
@@ -760,8 +910,8 @@ function saveEntry(){
   const date = document.getElementById('entryDate').value;
   const fiscalYear = String(document.getElementById('entryFiscalYear').value || date.slice(0,4));
   const description = document.getElementById('entryDesc').value.trim();
-  const dLines = debitFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim()}));
-  const cLines = creditFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim()}));
+  const dLines = debitFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), taxType:l.taxType||''}));
+  const cLines = creditFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), taxType:l.taxType||''}));
 
   if(!date){ alert('日付を入力してください'); return; }
   if(dLines.length===0 || cLines.length===0){ alert('借方・貸方それぞれ1行以上、科目と金額(0より大きい数)を入力してください'); return; }
@@ -1004,7 +1154,7 @@ function populateYearSelects(){
   if(!years.includes(thisYear)) years.push(thisYear);
   years.sort();
   const withAll = ['all', ...years];
-  ['journalYearSelect','ledgerYearSelect','trialYearSelect','plYearSelect','exportYearSelect'].forEach(id=>{
+  ['journalYearSelect','ledgerYearSelect','trialYearSelect','plYearSelect','exportYearSelect','taxYearSelect'].forEach(id=>{
     const el = document.getElementById(id);
     const prev = el.value;
     el.innerHTML = withAll.map(y=> y==='all' ? '<option value="all">全期間</option>' : `<option value="${y}">${y}年度</option>`).join('');
@@ -1423,6 +1573,346 @@ function renderBalanceSheet(){
   }
 }
 
+/* ---------------- 消費税 ---------------- */
+function saveTaxSettings(){
+  if(!currentUser) return;
+  const isTaxable = document.getElementById('taxIsTaxable').value;
+  const method = document.getElementById('taxMethod').value;
+  const simplifiedCategory = document.getElementById('taxSimplifiedCategory').value;
+  userDoc().collection('meta').doc('taxSettings').set({isTaxable, method, simplifiedCategory});
+}
+const SIMPLIFIED_RATES = {'1':0.9,'2':0.8,'3':0.7,'4':0.6,'5':0.5,'6':0.4};
+function computeTaxableAmounts(year){
+  const filtered = entries.filter(e => year==='all' || e.fiscalYear===year);
+  const sums = { sales:{'10':0,'8':0}, purchase:{'10':0,'8':0} };
+  filtered.forEach(e=>{
+    e.debitLines.forEach(l=>{
+      if(l.taxType!=='10' && l.taxType!=='8') return;
+      const a = accounts.find(x=>x.id===l.accountId);
+      if(!a) return;
+      if(a.category==='revenue') sums.sales[l.taxType] -= l.amount;
+      else if(a.category==='expense' || a.category==='asset') sums.purchase[l.taxType] += l.amount;
+    });
+    e.creditLines.forEach(l=>{
+      if(l.taxType!=='10' && l.taxType!=='8') return;
+      const a = accounts.find(x=>x.id===l.accountId);
+      if(!a) return;
+      if(a.category==='revenue') sums.sales[l.taxType] += l.amount;
+      else if(a.category==='expense' || a.category==='asset') sums.purchase[l.taxType] -= l.amount;
+    });
+  });
+  return sums;
+}
+function renderTaxCalc(){
+  const yearSel = document.getElementById('taxYearSelect');
+  const area = document.getElementById('taxCalcArea');
+  if(!yearSel || !area || !document.getElementById('taxMethod')) return;
+  const year = yearSel.value || 'all';
+  const method = document.getElementById('taxMethod').value;
+  const simpCat = document.getElementById('taxSimplifiedCategory').value;
+  const isTaxable = document.getElementById('taxIsTaxable').value;
+
+  const sums = computeTaxableAmounts(year);
+  const salesTax10 = sums.sales['10'] * 10/110;
+  const salesTax8 = sums.sales['8'] * 8/108;
+  const salesTaxTotal = salesTax10 + salesTax8;
+  const purchaseTax10 = sums.purchase['10'] * 10/110;
+  const purchaseTax8 = sums.purchase['8'] * 8/108;
+  const purchaseTaxTotal = purchaseTax10 + purchaseTax8;
+
+  let payable;
+  if(method==='simplified'){
+    const rate = SIMPLIFIED_RATES[simpCat] || 0.4;
+    payable = salesTaxTotal * (1-rate);
+  } else {
+    payable = salesTaxTotal - purchaseTaxTotal;
+  }
+  const national = payable*0.78, local = payable*0.22;
+
+  let html = '';
+  if(isTaxable==='no'){
+    html += `<p class="hint" style="background:#eefaf3;padding:10px;border-radius:6px;">免税事業者として設定されているため、消費税の申告は原則不要です。参考値として計算結果を表示しています。</p>`;
+  } else if(isTaxable==='unknown'){
+    html += `<p class="hint" style="background:#fff8e6;padding:10px;border-radius:6px;">課税事業者かどうかが未設定です。上の設定で選択してください。</p>`;
+  }
+  html += '<table><tr><th class="left">項目</th><th>金額</th></tr>';
+  html += `<tr><td class="left">課税売上高(税込・10%対象)</td><td>${fmtYen(sums.sales['10'])}</td></tr>`;
+  html += `<tr><td class="left">課税売上高(税込・8%対象)</td><td>${fmtYen(sums.sales['8'])}</td></tr>`;
+  html += `<tr class="total-row"><td class="left">課税売上に係る消費税額</td><td>${fmtYen(salesTaxTotal)}</td></tr>`;
+  if(method==='general'){
+    html += `<tr><td class="left">課税仕入高(税込・10%対象)</td><td>${fmtYen(sums.purchase['10'])}</td></tr>`;
+    html += `<tr><td class="left">課税仕入高(税込・8%対象)</td><td>${fmtYen(sums.purchase['8'])}</td></tr>`;
+    html += `<tr class="total-row"><td class="left">課税仕入に係る消費税額</td><td>${fmtYen(purchaseTaxTotal)}</td></tr>`;
+  } else {
+    const rate = SIMPLIFIED_RATES[simpCat] || 0.4;
+    html += `<tr><td class="left">みなし仕入率(第${simpCat}種)</td><td>${Math.round(rate*100)}%</td></tr>`;
+    html += `<tr><td class="left">みなし仕入に係る消費税額</td><td>${fmtYen(salesTaxTotal*rate)}</td></tr>`;
+  }
+  html += `<tr class="pl-final"><td class="left">差引消費税額(概算・納付額)</td><td>${fmtYen(Math.round(payable))}</td></tr>`;
+  html += `<tr><td class="left" style="font-size:12px;color:var(--muted);">内訳(参考)・国税(消費税)</td><td style="font-size:12px;color:var(--muted);">${fmtYen(Math.round(national))}</td></tr>`;
+  html += `<tr><td class="left" style="font-size:12px;color:var(--muted);">内訳(参考)・地方消費税</td><td style="font-size:12px;color:var(--muted);">${fmtYen(Math.round(local))}</td></tr>`;
+  html += '</table>';
+  html += `<p class="hint" style="margin-top:10px;">仕訳入力で各行に「税区分(課税10%/課税8%)」を付けていない取引はここに含まれません。端数処理は概算です。実際の申告額は国税庁の計算方法に従って確定してください。</p>`;
+  area.innerHTML = html;
+}
+
+/* ---------------- 従業員・給与明細 ---------------- */
+function addEmployee(){
+  const name = document.getElementById('newEmployeeName').value.trim();
+  const role = document.getElementById('newEmployeeRole').value;
+  if(!name){ alert('氏名を入力してください'); return; }
+  userDoc().collection('employees').add({name, role}).then(()=>{ document.getElementById('newEmployeeName').value=''; });
+}
+function deleteEmployee(id){
+  if(payslips.some(p=>p.employeeId===id)){ alert('この従業員の給与明細が保存されているため削除できません。'); return; }
+  if(confirm('この従業員を削除しますか?')) userDoc().collection('employees').doc(id).delete();
+}
+function renderEmployeeTable(){
+  let html = '<tr><th class="left">氏名</th><th class="left">区分</th><th></th></tr>';
+  employees.forEach(e=>{
+    html += `<tr><td class="left">${escapeHtml(e.name)}</td><td class="left">${e.role==='officer'?'役員':'従業員'}</td><td><button class="btn-danger btn-sm" onclick="deleteEmployee('${e.id}')">削除</button></td></tr>`;
+  });
+  document.getElementById('employeeTable').innerHTML = html || '<tr><td class="empty-msg">従業員が登録されていません</td></tr>';
+}
+function renderEmployeeSelects(){
+  const opts = employees.map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+  ['payslipEmployeeSelect','ledgerEmployeeFilter','withholdingEmployeeSelect'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    const prev = el.value;
+    const withAllOpt = id==='ledgerEmployeeFilter' ? '<option value="all">すべて</option>' : '';
+    el.innerHTML = withAllOpt + opts;
+    if([...el.options].some(o=>o.value===prev)) el.value = prev;
+  });
+  renderPayslipLedger();
+}
+function renderPayrollAccountSelects(){
+  const paySel = document.getElementById('paySourceAccountSelect');
+  if(!paySel) return;
+  ['paySourceAccountSelect','payDepositAccountSelect','payPaymentAccountSelect'].forEach(id=>{
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = accountOptionsHtml(null);
+    if([...sel.options].some(o=>o.value===prev)) sel.value = prev;
+  });
+}
+
+let payFormLines = [];
+let deductFormLines = [];
+let payLineIdCounter = 0;
+let editingPayslipId = null;
+
+function defaultPayLines(){ return [{tempId:++payLineIdCounter, label:'基本給', amount:''}]; }
+function defaultDeductLines(){ return ['健康保険','厚生年金','雇用保険','所得税','住民税'].map(label=>({tempId:++payLineIdCounter, label, amount:''})); }
+function resetPayslipForm(){
+  editingPayslipId = null;
+  document.getElementById('payslipYearMonth').value = new Date().toISOString().slice(0,7);
+  document.getElementById('payslipPayDate').valueAsDate = new Date();
+  payFormLines = defaultPayLines();
+  deductFormLines = defaultDeductLines();
+  renderPayLines('pay'); renderPayLines('deduct');
+  document.getElementById('payslipFormTitle').textContent = '給与明細を作成';
+}
+function addPayLine(kind){
+  const line = {tempId:++payLineIdCounter, label:'', amount:''};
+  (kind==='pay'?payFormLines:deductFormLines).push(line);
+  renderPayLines(kind);
+}
+function removePayLine(kind, tempId){
+  if(kind==='pay'){ payFormLines = payFormLines.filter(l=>l.tempId!==tempId); } else { deductFormLines = deductFormLines.filter(l=>l.tempId!==tempId); }
+  renderPayLines(kind);
+}
+function updatePayLine(kind, tempId, field, value){
+  const arr = kind==='pay'?payFormLines:deductFormLines;
+  const line = arr.find(l=>l.tempId===tempId);
+  if(line) line[field]=value;
+  recalcPayroll();
+}
+function payLineRowHtml(kind, line){
+  return `<div class="line-row">
+    <input type="text" placeholder="項目名" value="${escapeHtml(line.label)}" oninput="updatePayLine('${kind}',${line.tempId},'label',this.value)" style="flex:1;min-width:0;padding:7px;border:1px solid var(--border);border-radius:6px;">
+    <input type="number" min="0" placeholder="金額" value="${line.amount}" oninput="updatePayLine('${kind}',${line.tempId},'amount',this.value)">
+    <button onclick="removePayLine('${kind}',${line.tempId})">✕</button>
+  </div>`;
+}
+function renderPayLines(kind){
+  const areaId = kind==='pay' ? 'payLinesArea' : 'deductLinesArea';
+  const arr = kind==='pay' ? payFormLines : deductFormLines;
+  document.getElementById(areaId).innerHTML = arr.map(l=>payLineRowHtml(kind,l)).join('');
+  recalcPayroll();
+}
+function recalcPayroll(){
+  const payTotal = payFormLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const deductTotal = deductFormLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  document.getElementById('paySumTotal').textContent = fmtYen(payTotal);
+  document.getElementById('deductSumTotal').textContent = fmtYen(deductTotal);
+  document.getElementById('netPayIndicator').textContent = `差引支給額: ${fmtYen(payTotal-deductTotal)}`;
+}
+function savePayslip(){
+  const employeeId = document.getElementById('payslipEmployeeSelect').value;
+  const yearMonth = document.getElementById('payslipYearMonth').value;
+  const payDate = document.getElementById('payslipPayDate').value;
+  if(!employeeId){ alert('従業員を選択してください'); return; }
+  if(!yearMonth){ alert('対象年月を入力してください'); return; }
+  const employee = employees.find(e=>e.id===employeeId);
+  const payItems = payFormLines.filter(l=>l.label && parseFloat(l.amount)>0).map(l=>({label:l.label.trim(), amount:parseFloat(l.amount)}));
+  const deductItems = deductFormLines.filter(l=>l.label && parseFloat(l.amount)>0).map(l=>({label:l.label.trim(), amount:parseFloat(l.amount)}));
+  const grossTotal = payItems.reduce((s,l)=>s+l.amount,0);
+  const deductTotal = deductItems.reduce((s,l)=>s+l.amount,0);
+  const netPay = grossTotal - deductTotal;
+  const payload = { employeeId, employeeName: employee?employee.name:'', yearMonth, fiscalYear: yearMonth.slice(0,4), payDate, payItems, deductItems, grossTotal, deductTotal, netPay };
+  const promise = editingPayslipId ? userDoc().collection('payslips').doc(editingPayslipId).set(payload) : userDoc().collection('payslips').add(payload);
+  promise.then(()=>{ alert('保存しました'); resetPayslipForm(); });
+}
+function loadPayslipToJournal(){
+  const employeeId = document.getElementById('payslipEmployeeSelect').value;
+  const employee = employees.find(e=>e.id===employeeId);
+  const yearMonth = document.getElementById('payslipYearMonth').value;
+  const paySourceId = document.getElementById('paySourceAccountSelect').value;
+  const depositId = document.getElementById('payDepositAccountSelect').value;
+  const paymentId = document.getElementById('payPaymentAccountSelect').value;
+  const payDate = document.getElementById('payslipPayDate').value || (yearMonth ? yearMonth+'-25' : new Date().toISOString().slice(0,10));
+  if(!employee){ alert('従業員を選択してください'); return; }
+  if(!paySourceId || !depositId || !paymentId){ alert('仕訳作成用の科目(支給科目・預り金科目・支払口座)をすべて選択してください'); return; }
+  const payItems = payFormLines.filter(l=>l.label && parseFloat(l.amount)>0);
+  const deductItems = deductFormLines.filter(l=>l.label && parseFloat(l.amount)>0);
+  const grossTotal = payItems.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const deductTotal = deductItems.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const netPay = grossTotal - deductTotal;
+  if(grossTotal<=0){ alert('支給額を入力してください'); return; }
+  const tempEntry = {
+    id: null, date: payDate, fiscalYear: payDate.slice(0,4),
+    description: `${employee.name} ${yearMonth} 給与`,
+    debitLines: [{accountId: paySourceId, amount: grossTotal, tag: employee.name}],
+    creditLines: [
+      ...deductItems.map(l=>({accountId: depositId, amount: parseFloat(l.amount), tag: `${employee.name}/${yearMonth}/${l.label}`})),
+      ...(netPay>0 ? [{accountId: paymentId, amount: netPay, tag: employee.name}] : [])
+    ]
+  };
+  loadEntryIntoForm(tempEntry, true);
+}
+function editPayslip(id){
+  const p = payslips.find(x=>x.id===id);
+  if(!p) return;
+  editingPayslipId = id;
+  document.getElementById('payslipEmployeeSelect').value = p.employeeId;
+  document.getElementById('payslipYearMonth').value = p.yearMonth;
+  document.getElementById('payslipPayDate').value = p.payDate || '';
+  payFormLines = p.payItems.map(l=>({tempId:++payLineIdCounter, label:l.label, amount:l.amount}));
+  deductFormLines = p.deductItems.map(l=>({tempId:++payLineIdCounter, label:l.label, amount:l.amount}));
+  renderPayLines('pay'); renderPayLines('deduct');
+  document.getElementById('payslipFormTitle').textContent = '給与明細を編集';
+  switchTab('tab-payroll');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function deletePayslip(id){ if(confirm('この給与明細を削除しますか?')) userDoc().collection('payslips').doc(id).delete(); }
+
+function renderPayslipLedger(){
+  const empSel = document.getElementById('ledgerEmployeeFilter');
+  const yearSel = document.getElementById('ledgerPayrollYearFilter');
+  const whYearSel = document.getElementById('withholdingYearSelect');
+  if(!empSel || !yearSel) return;
+  const years = Array.from(new Set(payslips.map(p=>p.fiscalYear).filter(Boolean))).sort();
+  const prevY = yearSel.value;
+  yearSel.innerHTML = '<option value="all">すべて</option>' + years.map(y=>`<option value="${y}">${y}年</option>`).join('');
+  yearSel.value = (years.includes(prevY) || prevY==='all') ? (prevY||'all') : 'all';
+  if(whYearSel){
+    const prevWy = whYearSel.value;
+    whYearSel.innerHTML = years.map(y=>`<option value="${y}">${y}年</option>`).join('');
+    whYearSel.value = years.includes(prevWy) ? prevWy : (years[years.length-1]||'');
+  }
+
+  const empFilter = empSel.value || 'all';
+  const yearFilter = yearSel.value || 'all';
+  const rows = payslips.filter(p => (empFilter==='all'||p.employeeId===empFilter) && (yearFilter==='all'||p.fiscalYear===yearFilter))
+    .sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+  let html = '<tr><th class="left">対象年月</th><th class="left">氏名</th><th>支給合計</th><th>控除合計</th><th>差引支給額</th><th></th></tr>';
+  if(rows.length===0){ html += '<tr><td colspan="6" class="empty-msg">明細がありません</td></tr>'; }
+  rows.forEach(p=>{
+    html += `<tr>
+      <td class="left">${p.yearMonth}</td>
+      <td class="left">${escapeHtml(p.employeeName)}</td>
+      <td>${fmtYen(p.grossTotal)}</td>
+      <td>${fmtYen(p.deductTotal)}</td>
+      <td>${fmtYen(p.netPay)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn-outline btn-sm" onclick="printPayslip('${p.id}')">印刷</button>
+        <button class="btn-outline btn-sm" onclick="editPayslip('${p.id}')">編集</button>
+        <button class="btn-danger btn-sm" onclick="deletePayslip('${p.id}')">削除</button>
+      </td>
+    </tr>`;
+  });
+  document.getElementById('payslipLedgerTable').innerHTML = html;
+}
+
+function printPayslip(id){
+  const p = payslips.find(x=>x.id===id);
+  if(!p) return;
+  const rowsHtml = (items)=>items.map(l=>`<tr><td>${escapeHtml(l.label)}</td><td style="text-align:right;">${fmtYen(l.amount)}</td></tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><meta charset="UTF-8"><title>給与明細 ${p.yearMonth}</title>
+    <style>body{font-family:sans-serif;padding:30px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} td,th{border:1px solid #ccc;padding:6px 10px;} h1{font-size:18px;} .total{font-weight:bold;background:#f4f6f8;}</style>
+    </head><body>
+    <h1>給与明細書(${p.yearMonth})</h1>
+    <p>氏名: ${escapeHtml(p.employeeName)} 様 ／ 支給日: ${p.payDate||''}</p>
+    <h3>支給</h3><table>${rowsHtml(p.payItems)}<tr class="total"><td>支給合計</td><td style="text-align:right;">${fmtYen(p.grossTotal)}</td></tr></table>
+    <h3>控除</h3><table>${rowsHtml(p.deductItems)}<tr class="total"><td>控除合計</td><td style="text-align:right;">${fmtYen(p.deductTotal)}</td></tr></table>
+    <h3>差引支給額: ${fmtYen(p.netPay)}</h3>
+    <script>window.print();</script>
+    </body></html>`);
+  win.document.close();
+}
+
+function sumPayslipDeduct(rows, labelMatch){
+  let s=0; rows.forEach(p=> p.deductItems.forEach(l=>{ if(l.label===labelMatch) s+=l.amount; })); return s;
+}
+function renderWithholdingSlip(){
+  const empId = document.getElementById('withholdingEmployeeSelect').value;
+  const year = document.getElementById('withholdingYearSelect').value;
+  const area = document.getElementById('withholdingArea');
+  if(!empId || !year){ area.innerHTML = '<p class="empty-msg">従業員と年を選択してください</p>'; return; }
+  const rows = payslips.filter(p=>p.employeeId===empId && p.fiscalYear===year);
+  if(rows.length===0){ area.innerHTML = '<p class="empty-msg">対象年の給与明細がありません</p>'; return; }
+  const employee = employees.find(e=>e.id===empId);
+  const totalPay = rows.reduce((s,p)=>s+p.grossTotal,0);
+  const incomeTax = sumPayslipDeduct(rows, '所得税');
+  const socialInsurance = sumPayslipDeduct(rows,'健康保険') + sumPayslipDeduct(rows,'厚生年金') + sumPayslipDeduct(rows,'雇用保険');
+  const html = `<table>
+    <tr><th class="left">支払を受ける者</th><td>${escapeHtml(employee?employee.name:'')}</td></tr>
+    <tr><th class="left">支払金額(年間総支給額)</th><td>${fmtYen(totalPay)}</td></tr>
+    <tr><th class="left">社会保険料等の金額</th><td>${fmtYen(socialInsurance)}</td></tr>
+    <tr><th class="left">源泉徴収税額(年間合計)</th><td>${fmtYen(incomeTax)}</td></tr>
+    <tr><th class="left">給与所得控除後の金額</th><td style="color:var(--muted);">要計算(給与所得控除額表を適用)</td></tr>
+    <tr><th class="left">所得控除の額の合計額</th><td style="color:var(--muted);">要計算(年末調整で確定)</td></tr>
+  </table>
+  <button class="btn-outline btn-sm" style="margin-top:10px;" onclick="printWithholding('${empId}','${year}')">印刷</button>`;
+  area.innerHTML = html;
+}
+function printWithholding(empId, year){
+  const employee = employees.find(e=>e.id===empId);
+  const rows = payslips.filter(p=>p.employeeId===empId && p.fiscalYear===year);
+  const totalPay = rows.reduce((s,p)=>s+p.grossTotal,0);
+  const incomeTax = sumPayslipDeduct(rows,'所得税');
+  const socialInsurance = sumPayslipDeduct(rows,'健康保険')+sumPayslipDeduct(rows,'厚生年金')+sumPayslipDeduct(rows,'雇用保険');
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><meta charset="UTF-8"><title>源泉徴収票 ${year}</title>
+  <style>body{font-family:sans-serif;padding:30px;} table{width:100%;border-collapse:collapse;} td,th{border:1px solid #ccc;padding:8px 12px;text-align:left;}</style>
+  </head><body>
+  <h1>給与所得の源泉徴収票(簡易集計版) ${year}年分</h1>
+  <table>
+    <tr><th>支払を受ける者</th><td>${escapeHtml(employee?employee.name:'')}</td></tr>
+    <tr><th>支払金額</th><td>${fmtYen(totalPay)}</td></tr>
+    <tr><th>社会保険料等の金額</th><td>${fmtYen(socialInsurance)}</td></tr>
+    <tr><th>源泉徴収税額</th><td>${fmtYen(incomeTax)}</td></tr>
+    <tr><th>給与所得控除後の金額</th><td>要計算</td></tr>
+    <tr><th>所得控除の額の合計額</th><td>要計算</td></tr>
+  </table>
+  <p style="font-size:12px;color:#888;margin-top:20px;">※この帳票は保存済みの給与明細を単純集計した簡易版です。正式な提出書類としては、年末調整の計算を経た正確な値をご確認のうえご利用ください。</p>
+  <script>window.print();</script>
+  </body></html>`);
+  win.document.close();
+}
+
 /* ---------------- タブ切り替え ---------------- */
 function switchTab(tabId){
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
@@ -1438,8 +1928,14 @@ function escapeHtml(s){
 }
 
 /* 初期フォーム行 */
-debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:''}];
-creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:''}];
+debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
+creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
+payFormLines = defaultPayLines();
+deductFormLines = defaultDeductLines();
+renderPayLines('pay');
+renderPayLines('deduct');
+document.getElementById('payslipYearMonth').value = new Date().toISOString().slice(0,7);
+document.getElementById('payslipPayDate').valueAsDate = new Date();
 </script>
 </body>
 </html>
