@@ -1858,7 +1858,7 @@ function printPayslip(id){
     <h3>支給</h3><table>${rowsHtml(p.payItems)}<tr class="total"><td>支給合計</td><td style="text-align:right;">${fmtYen(p.grossTotal)}</td></tr></table>
     <h3>控除</h3><table>${rowsHtml(p.deductItems)}<tr class="total"><td>控除合計</td><td style="text-align:right;">${fmtYen(p.deductTotal)}</td></tr></table>
     <h3>差引支給額: ${fmtYen(p.netPay)}</h3>
-    <script>window.print();</script>
+    <script>window.print();<\/script>
     </body></html>`);
   win.document.close();
 }
@@ -1908,7 +1908,7 @@ function printWithholding(empId, year){
     <tr><th>所得控除の額の合計額</th><td>要計算</td></tr>
   </table>
   <p style="font-size:12px;color:#888;margin-top:20px;">※この帳票は保存済みの給与明細を単純集計した簡易版です。正式な提出書類としては、年末調整の計算を経た正確な値をご確認のうえご利用ください。</p>
-  <script>window.print();</script>
+  <script>window.print();<\/script>
   </body></html>`);
   win.document.close();
 }
