@@ -299,6 +299,7 @@
       <div class="card">
         <h3>勘定科目一覧</h3>
         <p class="hint">科目名・区分は直接編集できます(自動保存)。名称を変更すると、これまでの仕訳の表示にも即時反映されます。仕訳で使用中の科目は削除できません。</p>
+        <div id="accountDupArea"></div>
         <div class="table-wrap"><table id="accountsTable"></table></div>
       </div>
       <div class="card">
@@ -466,6 +467,7 @@ function startListeners(){
       onLedgerAccountChange();
       renderTrialBalance();
       renderPL();
+      renderAccountDuplicates();
     });
 }
 
@@ -505,6 +507,62 @@ function renderAccountSelects(){
   renderCreditLines();
 }
 
+function accountUsageCount(id){
+  let c=0;
+  entries.forEach(e=>{
+    e.debitLines.forEach(l=>{ if(l.accountId===id) c++; });
+    e.creditLines.forEach(l=>{ if(l.accountId===id) c++; });
+  });
+  return c;
+}
+let currentDupGroups = [];
+function findDuplicateAccountGroups(){
+  const map = {};
+  accounts.forEach(a=>{
+    const key = a.name.trim();
+    (map[key] = map[key]||[]).push(a);
+  });
+  return Object.values(map).filter(g=>g.length>1);
+}
+function renderAccountDuplicates(){
+  const area = document.getElementById('accountDupArea');
+  if(!area) return;
+  currentDupGroups = findDuplicateAccountGroups();
+  if(currentDupGroups.length===0){ area.innerHTML=''; return; }
+  let html = `<div class="dup-warning"><div class="dw-title">⚠ 同じ名前の科目が ${currentDupGroups.length}件のグループで重複しています</div>`;
+  currentDupGroups.forEach((g, gi)=>{
+    html += `<div class="dup-group" style="flex-direction:column;align-items:flex-start;">
+      <div style="margin-bottom:4px;">${escapeHtml(g[0].name)} が ${g.length}件(それぞれの使用中の仕訳数: ${g.map(a=>accountUsageCount(a.id)).join(' / ')})</div>
+      <div>${g.map((a,ai)=>`<button class="btn-outline btn-sm" style="margin:2px 4px 0 0;" onclick="mergeGroupTo(${gi},${ai})">これ(区分:${categoryLabels[a.category]})に統合</button>`).join('')}</div>
+    </div>`;
+  });
+  html += '</div>';
+  area.innerHTML = html;
+}
+function mergeDuplicateAccount(keepId, removeId){
+  if(keepId===removeId) return Promise.resolve();
+  const batch = db.batch();
+  let changedAny = false;
+  entries.forEach(e=>{
+    let changed = false;
+    const newDebit = e.debitLines.map(l=>{ if(l.accountId===removeId){ changed=true; return {...l, accountId:keepId}; } return l; });
+    const newCredit = e.creditLines.map(l=>{ if(l.accountId===removeId){ changed=true; return {...l, accountId:keepId}; } return l; });
+    if(changed){ changedAny=true; batch.update(userDoc().collection('entries').doc(e.id), { debitLines:newDebit, creditLines:newCredit }); }
+  });
+  batch.delete(userDoc().collection('accounts').doc(removeId));
+  return batch.commit();
+}
+function mergeGroupTo(groupIndex, keepIndex){
+  const group = currentDupGroups[groupIndex];
+  if(!group) return;
+  const keepId = group[keepIndex].id;
+  const removeIds = group.filter((_,i)=>i!==keepIndex).map(a=>a.id);
+  if(!confirm(`「${group[0].name}」の重複を1件に統合します。統合される科目を使っている仕訳はすべて残す科目に付け替えられます。よろしいですか?`)) return;
+  Promise.all(removeIds.map(id=>mergeDuplicateAccount(keepId, id))).then(()=>{
+    alert('統合しました');
+  }).catch(e=>{ alert('統合に失敗しました: '+e.message); });
+}
+
 function renderAccountsTable(){
   const sorted = [...accounts].sort((a,b)=> categoryOrder.indexOf(a.category)-categoryOrder.indexOf(b.category) || a.name.localeCompare(b.name,'ja'));
   const used = usedAccountIds();
@@ -522,6 +580,7 @@ function renderAccountsTable(){
     </tr>`;
   });
   document.getElementById('accountsTable').innerHTML = html || '<tr><td class="empty-msg">科目がありません</td></tr>';
+  renderAccountDuplicates();
 }
 
 function addAccount(){
