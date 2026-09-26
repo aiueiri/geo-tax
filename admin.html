@@ -1148,7 +1148,11 @@ function deleteEntry(id){
 function parseDateFlexible(str){
   str = (str||'').trim();
   if(/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  let m = str.match(/^(\d{4})[\/年](\d{1,2})[\/月](\d{1,2})日?$/);
+  // "2026/4/1" "2026-4-1" "2026.4.1" "2026年4月1日" など(区切り前後の余分な空白も許容)
+  let m = str.match(/^(\d{4})\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})\s*日?$/);
+  if(m){ return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; }
+  // "2026 4 1"(Excelのセル分割などでスペース区切りになったもの)
+  m = str.match(/^(\d{4})\s+(\d{1,2})\s+(\d{1,2})$/);
   if(m){ return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`; }
   const d = new Date(str);
   if(!isNaN(d.getTime())){
@@ -1169,7 +1173,7 @@ function previewPaste(){
     const date = parseDateFlexible(dateRaw);
     const debitA = accounts.find(a=>a.name===debitAcc);
     const creditA = accounts.find(a=>a.name===creditAcc);
-    const amtD = Number(debitAmt), amtC = Number(creditAmt);
+    const amtD = Number(String(debitAmt||'').replace(/,/g,'')), amtC = Number(String(creditAmt||'').replace(/,/g,''));
     const errors = [];
     if(!date) errors.push('日付不正');
     if(!debitA) errors.push('借方科目未登録');
