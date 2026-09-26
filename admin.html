@@ -53,6 +53,12 @@
   .company-bar{background:var(--accent-light);border-bottom:1px solid var(--border);padding:8px 22px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;}
   .company-bar label{color:var(--muted);}
   .company-bar select{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-weight:700;color:var(--navy);}
+  .modal-overlay{position:fixed;inset:0;background:rgba(20,30,40,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;}
+  .modal-overlay.hidden{display:none;}
+  .modal-box{background:#fff;border-radius:12px;padding:26px;width:100%;max-width:400px;box-shadow:0 10px 40px rgba(0,0,0,.25);}
+  .modal-box h3{margin:0 0 8px;color:var(--navy);font-size:16px;}
+  .modal-box #modalInput{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:6px;margin-top:10px;}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
   main{flex:1;padding:22px;max-width:1100px;margin:0 auto;width:100%;}
   .tab-panel{display:none;}
   .tab-panel.active{display:block;}
@@ -469,6 +475,18 @@
   </main>
 </div>
 
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <p id="modalMessage" class="hint"></p>
+    <input type="text" id="modalInput">
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">キャンセル</button>
+      <button class="btn-primary" id="modalConfirmBtn">OK</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* =========================================================
    Firebase設定
@@ -597,24 +615,56 @@ function initCompanies(){
     });
 }
 
+function showModal({title, message, placeholder, defaultValue, onConfirm, confirmLabel, hideInput}){
+  document.getElementById('modalTitle').textContent = title || '';
+  document.getElementById('modalMessage').textContent = message || '';
+  const input = document.getElementById('modalInput');
+  input.style.display = hideInput ? 'none' : 'block';
+  input.value = defaultValue || '';
+  input.placeholder = placeholder || '';
+  document.getElementById('modalOverlay').classList.remove('hidden');
+  const btn = document.getElementById('modalConfirmBtn');
+  btn.textContent = confirmLabel || 'OK';
+  btn.onclick = () => {
+    const val = hideInput ? null : input.value.trim();
+    closeModal();
+    if(onConfirm) onConfirm(val);
+  };
+  input.onkeydown = (e)=>{ if(e.key==='Enter') btn.click(); };
+  if(!hideInput) setTimeout(()=>input.focus(), 50);
+}
+function closeModal(){
+  document.getElementById('modalOverlay').classList.add('hidden');
+}
+
 function migrateOrCreateFirstCompany(){
   if(creatingFirstCompany) return;
   creatingFirstCompany = true;
   userDoc().collection('accounts').limit(1).get().then(snap=>{
     if(!snap.empty){
-      const name = prompt('既存の会社データが見つかりました。この会社の名前を入力してください(あとで変更できます)', '本社') || '本社';
-      migrateLegacyData(name);
+      showModal({
+        title:'会社名を入力',
+        message:'既存の会社データが見つかりました。この会社の名前を入力してください(あとで変更できます)',
+        defaultValue:'本社',
+        onConfirm:(name)=>{ migrateLegacyData(name || '本社'); }
+      });
     } else {
-      const name = prompt('最初の会社名を入力してください');
-      if(name){
-        userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
-          selectCompany(ref.id);
-          creatingFirstCompany = false;
-        });
-      } else {
-        creatingFirstCompany = false;
-      }
+      showModal({
+        title:'最初の会社を作成',
+        message:'会社名を入力してください',
+        placeholder:'例: 株式会社サンプル',
+        onConfirm:(name)=>{
+          if(!name){ creatingFirstCompany = false; return; }
+          userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
+            selectCompany(ref.id);
+            creatingFirstCompany = false;
+          });
+        }
+      });
     }
+  }).catch(e=>{
+    creatingFirstCompany = false;
+    showModal({title:'エラー', message:'データの確認に失敗しました: '+e.message, hideInput:true});
   });
 }
 
@@ -642,7 +692,7 @@ async function migrateLegacyData(name){
   }
   selectCompany(companyRef.id);
   creatingFirstCompany = false;
-  alert(`既存のデータを会社「${name}」として移行しました。`);
+  showModal({title:'移行完了', message:`既存のデータを会社「${name}」として移行しました。`, hideInput:true});
 }
 
 function selectCompany(id){
@@ -663,22 +713,32 @@ function renderCompanySelect(){
   const bar = document.getElementById('companyBar');
   const sel = document.getElementById('companySelect');
   if(!bar || !sel) return;
-  bar.style.display = companies.length>0 ? 'flex' : 'none';
-  sel.innerHTML = companies.map(c=>`<option value="${c.id}" ${c.id===currentCompanyId?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+  bar.style.display = 'flex'; // 会社が0件でもバー自体は常に表示し、作成手段を確保する
+  sel.innerHTML = companies.length>0
+    ? companies.map(c=>`<option value="${c.id}" ${c.id===currentCompanyId?'selected':''}>${escapeHtml(c.name)}</option>`).join('')
+    : '<option value="">(会社が登録されていません)</option>';
 }
 function promptCreateCompany(){
-  const name = prompt('新しい会社名を入力してください');
-  if(!name) return;
-  userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
-    selectCompany(ref.id);
+  showModal({
+    title:'新しい会社を追加',
+    message:'会社名を入力してください',
+    placeholder:'例: 株式会社サンプル',
+    onConfirm:(name)=>{
+      if(!name) return;
+      userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
+        selectCompany(ref.id);
+      });
+    }
   });
 }
 function promptRenameCompany(){
   const current = companies.find(c=>c.id===currentCompanyId);
-  if(!current) return;
-  const name = prompt('新しい会社名', current.name);
-  if(!name) return;
-  userDoc().collection('companies').doc(currentCompanyId).update({name});
+  if(!current){ showModal({title:'会社が選択されていません', message:'先に会社を作成・選択してください。', hideInput:true}); return; }
+  showModal({
+    title:'会社名を変更',
+    defaultValue:current.name,
+    onConfirm:(name)=>{ if(!name) return; userDoc().collection('companies').doc(currentCompanyId).update({name}); }
+  });
 }
 async function deleteCompanyData(companyId){
   const compRef = userDoc().collection('companies').doc(companyId);
@@ -698,13 +758,20 @@ async function deleteCompanyData(companyId){
   }
 }
 function promptDeleteCompany(){
-  if(companies.length<=1){ alert('最後の1社は削除できません。'); return; }
+  if(companies.length<=1){ showModal({title:'削除できません', message:'最後の1社は削除できません。', hideInput:true}); return; }
   const current = companies.find(c=>c.id===currentCompanyId);
   if(!current) return;
-  const typed = prompt(`本当に削除する場合は会社名「${current.name}」を正確に入力してください。この操作は元に戻せず、すべてのデータが削除されます。`);
-  if(typed!==current.name){ if(typed!==null) alert('会社名が一致しないため削除を中止しました。'); return; }
-  deleteCompanyData(currentCompanyId).then(()=>{
-    userDoc().collection('companies').doc(currentCompanyId).delete();
+  showModal({
+    title:'会社を削除',
+    message:`本当に削除する場合は会社名「${current.name}」を正確に入力してください。この操作は元に戻せず、すべてのデータが削除されます。`,
+    placeholder:current.name,
+    confirmLabel:'削除する',
+    onConfirm:(typed)=>{
+      if(typed!==current.name){ showModal({title:'削除を中止しました', message:'会社名が一致しませんでした。', hideInput:true}); return; }
+      deleteCompanyData(currentCompanyId).then(()=>{
+        userDoc().collection('companies').doc(currentCompanyId).delete();
+      });
+    }
   });
 }
 
