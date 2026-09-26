@@ -1161,6 +1161,18 @@ function parseDateFlexible(str){
   return null;
 }
 
+// 「日付」が1列(2026/4/1など)ではなく、年・月・日が別々の列に分かれている場合にも対応
+function extractDateAndRest(cols){
+  if(cols.length>=3){
+    const y = cols[0].trim(), moStr = cols[1].trim(), dStr = cols[2].trim();
+    const mo = parseInt(moStr,10), d = parseInt(dStr,10);
+    if(/^\d{4}$/.test(y) && /^\d{1,2}$/.test(moStr) && /^\d{1,2}$/.test(dStr) && mo>=1 && mo<=12 && d>=1 && d<=31){
+      return { date: `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`, rest: cols.slice(3) };
+    }
+  }
+  return { date: parseDateFlexible(cols[0]), rest: cols.slice(1) };
+}
+
 function previewPaste(){
   const raw = document.getElementById('pasteArea').value;
   const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
@@ -1168,9 +1180,10 @@ function previewPaste(){
   let html = '<div class="table-wrap"><table><tr><th class="left">日付</th><th class="left">借方科目</th><th>借方金額</th><th class="left">貸方科目</th><th>貸方金額</th><th class="left">摘要</th><th>状態</th></tr>';
 
   lines.forEach(line=>{
-    const cols = line.includes('\t') ? line.split('\t') : line.split(',');
-    const [dateRaw, debitAcc, debitAmt, creditAcc, creditAmt, desc] = cols.map(c=>(c||'').trim());
-    const date = parseDateFlexible(dateRaw);
+    const cols = (line.includes('\t') ? line.split('\t') : line.split(',')).map(c=>(c||'').trim());
+    const { date, rest } = extractDateAndRest(cols);
+    const [debitAcc, debitAmt, creditAcc, creditAmt, ...descParts] = rest;
+    const desc = descParts.filter(Boolean).join(' ').trim();
     const debitA = accounts.find(a=>a.name===debitAcc);
     const creditA = accounts.find(a=>a.name===creditAcc);
     const amtD = Number(String(debitAmt||'').replace(/,/g,'')), amtC = Number(String(creditAmt||'').replace(/,/g,''));
@@ -1191,7 +1204,7 @@ function previewPaste(){
       });
     }
     html += `<tr class="${ok?'row-ok':'row-error'}">
-      <td class="left">${escapeHtml(dateRaw)}</td>
+      <td class="left">${escapeHtml(date || cols.slice(0,3).join('/'))}</td>
       <td class="left">${escapeHtml(debitAcc)}</td>
       <td>${escapeHtml(debitAmt)}</td>
       <td class="left">${escapeHtml(creditAcc)}</td>
