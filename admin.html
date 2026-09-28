@@ -597,13 +597,14 @@ const categoryLabels = {asset:"資産", liability:"負債", equity:"純資産", 
 const categoryOrder = ["asset","liability","equity","revenue","expense"];
 const NORMAL_SIDE = {asset:"debit", expense:"debit", liability:"credit", equity:"credit", revenue:"credit"};
 const CORP_TAX_ACCOUNT_NAME = "法人税等"; // 損益計算書で税引前・税引後を分けて表示するための特別扱い
+function isCorpTaxAccount(a){ return a.category==="expense" && (a.name===CORP_TAX_ACCOUNT_NAME || a.name.startsWith("法人税")); }
 
 const DEFAULT_ACCOUNTS = [
   ["現金","asset"],["普通預金","asset"],["売掛金","asset"],["前払費用","asset"],["工具器具備品","asset"],
   ["建物","asset"],["車両運搬具","asset"],["役員貸付金","asset"],
   ["買掛金","liability"],["未払金","liability"],["預り金","liability"],["借入金","liability"],
   ["未払法人税等","liability"],["役員借入金","liability"],
-  ["資本金","equity"],["資本準備金","equity"],
+  ["資本金","equity"],["資本準備金","equity"],["繰越利益剰余金","equity"],
   ["売上高","revenue"],["雑収入","revenue"],
   ["仕入高","expense"],["役員報酬","expense"],["給料手当","expense"],["法定福利費","expense"],["外注費","expense"],
   ["地代家賃","expense"],["水道光熱費","expense"],["旅費交通費","expense"],["通信費","expense"],["広告宣伝費","expense"],
@@ -1673,9 +1674,7 @@ function renderOpeningBalanceTable(){
   table.innerHTML = html;
   renderOpeningBalanceCheck();
 }
-function renderOpeningBalanceCheck(){
-  const area = document.getElementById('openingBalanceCheckArea');
-  if(!area) return;
+function openingSums(){
   let assetSum=0, otherSum=0;
   accounts.forEach(a=>{
     const v = openingBalanceDraft[a.id];
@@ -1683,16 +1682,42 @@ function renderOpeningBalanceCheck(){
     if(a.category==='asset') assetSum += v;
     else if(a.category==='liability' || a.category==='equity') otherSum += v;
   });
+  return { assetSum, otherSum };
+}
+function renderOpeningBalanceCheck(){
+  const area = document.getElementById('openingBalanceCheckArea');
+  if(!area) return;
+  const { assetSum, otherSum } = openingSums();
   if(assetSum===0 && otherSum===0){ area.innerHTML=''; return; }
   if(Math.abs(assetSum-otherSum)<0.5){
     area.innerHTML = `<span class="match-ok">✓ 資産 = 負債+純資産 が一致しています(${fmtYen(assetSum)})</span>`;
   } else {
-    area.innerHTML = `<span class="match-bad">⚠ 一致していません(資産 ${fmtYen(assetSum)} ／ 負債+純資産 ${fmtYen(otherSum)})。一致するまで金額を見直してください。</span>`;
+    const diff = Math.round(assetSum-otherSum);
+    area.innerHTML = `<span class="match-bad">⚠ 一致していません(資産 ${fmtYen(assetSum)} ／ 負債+純資産 ${fmtYen(otherSum)})。純資産があと ${fmtYen(diff)} 必要です(マイナスは債務超過を意味します)。</span>
+      <div style="margin-top:8px;"><button class="btn-outline btn-sm" onclick="autoBalanceOpeningToRetained()">差額を「繰越利益剰余金」に自動で入れる</button></div>`;
+  }
+}
+function autoBalanceOpeningToRetained(){
+  const { assetSum, otherSum } = openingSums();
+  const diff = Math.round(assetSum - otherSum);
+  const retained = accounts.find(a=>a.category==='equity' && a.name==='繰越利益剰余金');
+  if(retained){
+    openingBalanceDraft[retained.id] = Math.round((openingBalanceDraft[retained.id]||0) + diff);
+    renderOpeningBalanceTable();
+  } else {
+    // 科目がまだ無い会社では、その場で作成してから差額を入れる
+    companyDoc().collection('accounts').add({name:'繰越利益剰余金', category:'equity'}).then(ref=>{
+      openingBalanceDraft[ref.id] = diff;
+    });
   }
 }
 function saveOpeningBalances(){
   const fiscalYear = document.getElementById('openingFiscalYearInput').value.trim();
   if(!fiscalYear){ alert('対象会計年度を入力してください'); return; }
+  const { assetSum, otherSum } = openingSums();
+  if(Math.abs(assetSum-otherSum)>=0.5){
+    if(!confirm(`資産(${fmtYen(assetSum)})と負債+純資産(${fmtYen(otherSum)})が一致していません。\nこのまま保存すると試算表・貸借対照表の貸借が合いません。それでも保存しますか?`)) return;
+  }
   const cleaned = {};
   Object.entries(openingBalanceDraft).forEach(([k,v])=>{ if(v) cleaned[k]=v; });
   companyDoc().collection('meta').doc('openingBalances').set({fiscalYear, balances:cleaned}).then(()=>{
@@ -1927,8 +1952,8 @@ function renderTrialBalance(){
     const hasOpening = cumulative && openYear && year>=openYear && openingBalanceFor(a.id);
     if(hasOpening){ net += isDebitNormal ? openingBalanceFor(a.id) : -openingBalanceFor(a.id); }
     if(debitTotal===0 && creditTotal===0 && !hasOpening) return;
-    const debitBal = isDebitNormal ? Math.max(net,0) : Math.max(-net,0);
-    const creditBal = isDebitNormal ? Math.max(-net,0) : Math.max(net,0);
+    const debitBal = Math.max(net,0);   // net = 借方-貸方。正なら借方残高、負なら貸方残高(科目の区分に関係なく)
+    const creditBal = Math.max(-net,0);
     sumDebitTotal+=debitTotal; sumCreditTotal+=creditTotal; sumDebitBal+=debitBal; sumCreditBal+=creditBal;
     html += `<tr>
       <td class="left">${escapeHtml(a.name)}${hasOpening?' <span style="color:var(--muted);font-size:11px;">(期首残高含む)</span>':''}</td>
@@ -1973,8 +1998,8 @@ function renderPL(){
   const filtered = entries.filter(e=> year==='all' || e.fiscalYear===year);
 
   const revenueAccs = accounts.filter(a=>a.category==='revenue').sort((a,b)=>a.name.localeCompare(b.name,'ja'));
-  const expenseAccs = accounts.filter(a=>a.category==='expense' && a.name!==CORP_TAX_ACCOUNT_NAME).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
-  const taxAcc = accounts.find(a=>a.category==='expense' && a.name===CORP_TAX_ACCOUNT_NAME);
+  const expenseAccs = accounts.filter(a=>a.category==='expense' && !isCorpTaxAccount(a)).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+  const taxAccs = accounts.filter(a=>isCorpTaxAccount(a));
 
   function sumFor(a){
     let debit=0, credit=0;
@@ -2012,12 +2037,15 @@ function renderPL(){
   html += `<tr class="pl-section-header"><td class="left">${pretax>=0?'税引前当期純利益':'税引前当期純損失'}</td><td>${fmtYen(Math.abs(pretax))}</td></tr>`;
 
   let taxAmount = 0;
-  if(taxAcc){
-    const {debit,credit} = sumFor(taxAcc);
-    taxAmount = debit - credit;
-    html += `<tr><td class="left">${escapeHtml(taxAcc.name)}(法人税・住民税・事業税)</td><td>${fmtYen(taxAmount)}</td></tr>`;
+  if(taxAccs.length>0){
+    taxAccs.forEach(ta=>{
+      const {debit,credit} = sumFor(ta);
+      const amt = debit - credit;
+      taxAmount += amt;
+      html += `<tr><td class="left">${escapeHtml(ta.name)}</td><td>${fmtYen(amt)}</td></tr>`;
+    });
   } else {
-    html += `<tr><td class="left" colspan="2" style="color:var(--muted);font-size:12px;">「法人税等」の科目が見つかりません(科目設定で削除・改名された可能性があります)</td></tr>`;
+    html += `<tr><td class="left" colspan="2" style="color:var(--muted);font-size:12px;">法人税等の科目(名前が「法人税」で始まる費用科目)が見つかりません</td></tr>`;
   }
 
   const net = pretax - taxAmount;
@@ -2079,8 +2107,11 @@ function renderBalanceSheet(){
 
   const equityRows = equityAccs.map(a=>({name:a.name, val:balanceOf(a)})).filter(r=>r.val!==0);
   equityRows.forEach(r=>equityTotal+=r.val);
-  const retained = netIncomeThroughYear(year);
-  if(Math.abs(retained)>0.0001){ equityRows.push({name:'繰越利益剰余金(自動計算・当期分を含む)', val:retained}); equityTotal += retained; }
+  // 開始時点以降の損益を、前期以前の累計と当期に分けて純資産に自動で繰り入れる(別途の決算仕訳は不要)
+  const priorNet = priorYearsNetIncome(year);
+  const currentNet = netIncomeThroughYear(year) - priorNet;
+  if(Math.abs(priorNet)>0.0001){ equityRows.push({name:'繰越損益(前期以前の累計・自動計算)', val:priorNet}); equityTotal += priorNet; }
+  if(Math.abs(currentNet)>0.0001){ equityRows.push({name: currentNet>=0 ? '当期純利益(自動計算)' : '当期純損失(自動計算)', val:currentNet}); equityTotal += currentNet; }
 
   const rightRows = liabRows.map(r=>({...r, group:'負債'})).concat(equityRows.map(r=>({...r, group:'純資産'})));
   const maxLen = Math.max(assetRows.length, rightRows.length, 1);
@@ -2703,7 +2734,7 @@ function switchTab(tabId){
 }
 
 /* ---------------- ユーティリティ ---------------- */
-function fmtYen(n){ return '¥' + Number(n||0).toLocaleString('ja-JP'); }
+function fmtYen(n){ const v = Number(n||0); return (v<0?'-':'') + '¥' + Math.abs(v).toLocaleString('ja-JP'); }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
