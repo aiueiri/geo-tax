@@ -812,7 +812,7 @@ function migrateOrCreateFirstCompany(){
 
 async function migrateLegacyData(name){
   const companyRef = await userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
-  const cols = ['accounts','entries','employees','payslips'];
+  const cols = ['accounts','entries','employees','payslips','fixedAssets'];
   for(const colName of cols){
     const snap = await userDoc().collection(colName).get();
     if(snap.empty) continue;
