@@ -1371,7 +1371,7 @@ function extractDateAndRest(cols){
 
 function accountNameOptionsHtml(selectedName){
   let html = `<option value="">(未選択)</option>`;
-  CATEGORY_ORDER.forEach(cat=>{
+  categoryOrder.forEach(cat=>{
     const list = accounts.filter(a=>a.category===cat);
     if(list.length===0) return;
     html += `<optgroup label="${categoryLabels[cat]}">`;
