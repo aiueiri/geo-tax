@@ -111,6 +111,7 @@
   .open-items .oi-title{font-weight:700;color:var(--navy);margin-bottom:6px;}
   .open-item-row{display:flex;justify-content:space-between;padding:3px 0;}
   .open-item-row .oi-tag{color:var(--text);}
+  .oi-detail{font-size:12px;color:var(--muted);margin:0 0 8px 10px;line-height:1.6;}
   .open-item-row .oi-amt{font-weight:700;}
   .bank-in{color:var(--accent);font-weight:700;}
   .bank-out{color:var(--danger);font-weight:700;}
@@ -296,6 +297,13 @@
         <div id="matchingArea" style="margin-bottom:14px;"></div>
         <div class="table-wrap"><table id="ledgerTable"></table></div>
       </div>
+
+      <div class="card">
+        <h3>補助タグの整理(「年金2025年1月分」→「年金」+「2025年1月分」に分ける)</h3>
+        <p class="hint">上で選んでいる科目の補助タグを、大分類(補助)と詳細(何月分など)に分け直します。「案を作る」で自動で分けた案が入るので、内容を確認・修正してから「この内容で更新」を押してください。すでに詳細が入っている行は変更されません。</p>
+        <button class="btn-outline btn-sm" onclick="buildTagCleanup()">この科目のタグを調べて案を作る</button>
+        <div id="tagCleanupArea" style="margin-top:12px;"></div>
+      </div>
     </div>
 
     <!-- 試算表タブ -->
@@ -415,8 +423,15 @@
         <h3 id="payslipFormTitle">給与明細を作成</h3>
         <div class="form-row">
           <label>従業員<select id="payslipEmployeeSelect"></select></label>
-          <label>対象年月<input type="month" id="payslipYearMonth"></label>
+          <label>対象年月(賃金計算期間)<input type="month" id="payslipYearMonth"></label>
           <label>支給日<input type="date" id="payslipPayDate"></label>
+        </div>
+        <div class="form-row">
+          <label>労働日数<input type="number" id="payslipWorkDays" min="0" step="0.5"></label>
+          <label>労働時間数<input type="number" id="payslipRegularHours" min="0" step="0.25"></label>
+          <label>時間外労働時間<input type="number" id="payslipOvertimeHours" min="0" step="0.25"></label>
+          <label>深夜労働時間<input type="number" id="payslipNightHours" min="0" step="0.25"></label>
+          <label>休日労働時間<input type="number" id="payslipHolidayHours" min="0" step="0.25"></label>
         </div>
         <div class="form-row">
           <div class="lines-box debit" style="flex:1;min-width:280px;">
@@ -430,28 +445,43 @@
             <button class="add-line-btn" onclick="addPayLine('deduct')">＋ 項目を追加</button>
           </div>
         </div>
-        <p class="hint">社会保険料・所得税・住民税の金額は、公式の保険料額表・源泉徴収税額表に基づいて入力してください(このアプリでは自動計算していません)。</p>
+        <p class="hint">労働日数・労働時間数は任意です(賃金台帳の記載事項なので、入力しておくと賃金台帳にそのまま反映されます)。社会保険料・所得税・住民税の金額は、公式の保険料額表・源泉徴収税額表に基づいて入力してください(このアプリでは自動計算していません)。</p>
         <div class="balance-indicator balance-ok" id="netPayIndicator">差引支給額: ¥0</div>
         <div class="form-row" style="margin-top:14px;">
           <label>仕訳作成: 支給科目<select id="paySourceAccountSelect"></select></label>
           <label>預り金科目<select id="payDepositAccountSelect"></select></label>
           <label>支払口座<select id="payPaymentAccountSelect"></select></label>
         </div>
-        <div style="margin-top:10px;display:flex;gap:10px;">
-          <button class="btn-primary" onclick="savePayslip()">この明細を保存</button>
-          <button class="btn-outline" onclick="loadPayslipToJournal()">仕訳入力に読み込む</button>
+        <div id="payslipEntryLinkArea" style="margin:8px 0;"></div>
+        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn-primary" onclick="savePayslip()">この明細を保存(仕訳は作らない)</button>
+          <button class="btn-accent" onclick="savePayslipAndCreateEntry()">保存して仕訳も作成する</button>
+          <button class="btn-outline" onclick="loadPayslipToJournal()">仕訳入力に読み込む(手動で確認してから登録)</button>
         </div>
       </div>
 
       <div class="card">
         <div class="toolbar">
-          <h3 style="margin:0;flex:1;">給与台帳</h3>
+          <h3 style="margin:0;flex:1;">給与台帳(明細一覧)</h3>
           <label>従業員:</label>
           <select id="ledgerEmployeeFilter" onchange="renderPayslipLedger()"></select>
           <label>年:</label>
           <select id="ledgerPayrollYearFilter" onchange="renderPayslipLedger()"></select>
         </div>
         <div class="table-wrap"><table id="payslipLedgerTable"></table></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0;flex:1;">賃金台帳</h3>
+          <label>従業員:</label>
+          <select id="wageLedgerEmployeeSelect"></select>
+          <label>年:</label>
+          <select id="wageLedgerYearSelect"></select>
+          <button class="btn-outline btn-sm" onclick="renderWageLedger()">表示する</button>
+        </div>
+        <p class="hint">労働基準法で保存が義務づけられている賃金台帳の形式(賃金計算期間・労働日数・労働時間数・支給/控除の内訳)で、保存済みの給与明細を1年分まとめて表示します。</p>
+        <div id="wageLedgerArea"></div>
       </div>
 
       <div class="card">
@@ -563,6 +593,9 @@
 
   </main>
 </div>
+
+<datalist id="tagOptions"></datalist>
+<datalist id="subTagOptions"></datalist>
 
 <div id="modalOverlay" class="modal-overlay hidden">
   <div class="modal-box">
@@ -783,21 +816,21 @@ async function migrateLegacyData(name){
   for(const colName of cols){
     const snap = await userDoc().collection(colName).get();
     if(snap.empty) continue;
-    const batch = db.batch();
+    const ops = [];
     snap.docs.forEach(d=>{
-      batch.set(companyRef.collection(colName).doc(d.id), d.data());
-      batch.delete(d.ref);
+      ops.push({type:'set', ref: companyRef.collection(colName).doc(d.id), data: d.data()});
+      ops.push({type:'delete', ref: d.ref});
     });
-    await batch.commit();
+    await commitInChunks(ops);
   }
   const metaSnap = await userDoc().collection('meta').get();
   if(!metaSnap.empty){
-    const batch2 = db.batch();
+    const ops2 = [];
     metaSnap.docs.forEach(d=>{
-      batch2.set(companyRef.collection('meta').doc(d.id), d.data());
-      batch2.delete(d.ref);
+      ops2.push({type:'set', ref: companyRef.collection('meta').doc(d.id), data: d.data()});
+      ops2.push({type:'delete', ref: d.ref});
     });
-    await batch2.commit();
+    await commitInChunks(ops2);
   }
   selectCompany(companyRef.id);
   creatingFirstCompany = false;
@@ -856,15 +889,11 @@ async function deleteCompanyData(companyId){
   for(const colName of cols){
     const snap = await compRef.collection(colName).get();
     if(snap.empty) continue;
-    const batch = db.batch();
-    snap.docs.forEach(d=>batch.delete(d.ref));
-    await batch.commit();
+    await commitInChunks(snap.docs.map(d=>({type:'delete', ref:d.ref})));
   }
   const metaSnap = await compRef.collection('meta').get();
   if(!metaSnap.empty){
-    const batch2 = db.batch();
-    metaSnap.docs.forEach(d=>batch2.delete(d.ref));
-    await batch2.commit();
+    await commitInChunks(metaSnap.docs.map(d=>({type:'delete', ref:d.ref})));
   }
 }
 function promptDeleteCompany(){
@@ -887,6 +916,19 @@ function promptDeleteCompany(){
 
 /* ---------------- Firestore ---------------- */
 function userDoc(){ return db.collection('corp_users').doc(currentUser.uid); }
+
+// Firestoreの1バッチは最大500件までのため、大量データはこの関数でチャンクに分けてコミットする
+async function commitInChunks(operations, chunkSize=400){
+  for(let i=0;i<operations.length;i+=chunkSize){
+    const batch = db.batch();
+    operations.slice(i,i+chunkSize).forEach(op=>{
+      if(op.type==='set') batch.set(op.ref, op.data);
+      else if(op.type==='update') batch.update(op.ref, op.data);
+      else if(op.type==='delete') batch.delete(op.ref);
+    });
+    await batch.commit();
+  }
+}
 
 // 初回のみ標準科目を作成(トランザクションで二重作成を防止)
 function ensureAccountsSeeded(){
@@ -985,9 +1027,25 @@ function startListeners(){
       renderAccountDuplicates();
       renderTaxCalc();
       renderDepreciationCalc();
+      renderTagDatalists();
+      renderPayslipLedger();
     });
 }
 
+const STANDARD_TAGS = ['所得税','住民税','健康保険','厚生年金','雇用保険'];
+function renderTagDatalists(){
+  const tagEl = document.getElementById('tagOptions'), subEl = document.getElementById('subTagOptions');
+  if(!tagEl || !subEl) return;
+  const tags = new Set(STANDARD_TAGS), subs = new Set();
+  entries.forEach(e=>[...e.debitLines, ...e.creditLines].forEach(l=>{ if(l.tag) tags.add(l.tag); if(l.subTag) subs.add(l.subTag); }));
+  tagEl.innerHTML = [...tags].map(t=>`<option value="${escapeHtml(t)}">`).join('');
+  subEl.innerHTML = [...subs].sort().map(t=>`<option value="${escapeHtml(t)}">`).join('');
+}
+// "2025-01" → "2025年1月分"
+function monthLabel(yearMonth){
+  const m = /^(\d{4})-(\d{1,2})$/.exec(yearMonth||'');
+  return m ? `${m[1]}年${parseInt(m[2],10)}月分` : (yearMonth||'');
+}
 function accountName(id){ const a = accounts.find(x=>x.id===id); return a ? a.name : '(不明な科目)'; }
 function usedAccountIds(){
   const s = new Set();
@@ -1058,16 +1116,15 @@ function renderAccountDuplicates(){
 }
 function mergeDuplicateAccount(keepId, removeId){
   if(keepId===removeId) return Promise.resolve();
-  const batch = db.batch();
-  let changedAny = false;
+  const ops = [];
   entries.forEach(e=>{
     let changed = false;
     const newDebit = e.debitLines.map(l=>{ if(l.accountId===removeId){ changed=true; return {...l, accountId:keepId}; } return l; });
     const newCredit = e.creditLines.map(l=>{ if(l.accountId===removeId){ changed=true; return {...l, accountId:keepId}; } return l; });
-    if(changed){ changedAny=true; batch.update(companyDoc().collection('entries').doc(e.id), { debitLines:newDebit, creditLines:newCredit }); }
+    if(changed){ ops.push({type:'update', ref: companyDoc().collection('entries').doc(e.id), data:{ debitLines:newDebit, creditLines:newCredit }}); }
   });
-  batch.delete(companyDoc().collection('accounts').doc(removeId));
-  return batch.commit();
+  ops.push({type:'delete', ref: companyDoc().collection('accounts').doc(removeId)});
+  return commitInChunks(ops);
 }
 function mergeGroupTo(groupIndex, keepIndex){
   const group = currentDupGroups[groupIndex];
@@ -1143,9 +1200,8 @@ function bulkAddAccounts(){
     toAdd.push({name, category});
   });
   if(toAdd.length===0){ document.getElementById('bulkAccountMsg').textContent = `追加なし(重複 ${skipped}件)`; return; }
-  const batch = db.batch();
-  toAdd.forEach(a=>{ const ref = companyDoc().collection('accounts').doc(); batch.set(ref, a); });
-  batch.commit().then(()=>{
+  const ops = toAdd.map(a=>({type:'set', ref: companyDoc().collection('accounts').doc(), data:a}));
+  commitInChunks(ops).then(()=>{
     document.getElementById('bulkAccountMsg').textContent = `${toAdd.length}件追加しました${skipped?`(重複 ${skipped}件はスキップ)`:''}`;
     document.getElementById('bulkAccountArea').value = '';
   });
@@ -1160,7 +1216,7 @@ function onDateChange(){
 }
 
 function addLine(side){
-  const line = { tempId: ++lineIdCounter, accountId:'', amount:'', tag:'', taxType:'' };
+  const line = { tempId: ++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:'' };
   (side==='debit'?debitFormLines:creditFormLines).push(line);
   side==='debit' ? renderDebitLines() : renderCreditLines();
 }
@@ -1191,7 +1247,8 @@ function lineRowHtml(side, line){
   return `<div class="line-row">
     <select onchange="updateLineField('${side}',${line.tempId},'accountId',this.value)">${accountOptionsHtml(line.accountId)}</select>
     <input type="number" min="0" placeholder="金額" value="${line.amount}" oninput="updateLineField('${side}',${line.tempId},'amount',this.value)">
-    <input type="text" class="tag-input" placeholder="補助(任意)" value="${escapeHtml(line.tag||'')}" oninput="updateLineField('${side}',${line.tempId},'tag',this.value)">
+    <input type="text" class="tag-input" list="tagOptions" placeholder="補助(年金・所得税など)" value="${escapeHtml(line.tag||'')}" oninput="updateLineField('${side}',${line.tempId},'tag',this.value)">
+    <input type="text" class="tag-input" list="subTagOptions" placeholder="詳細(何月分など)" value="${escapeHtml(line.subTag||'')}" oninput="updateLineField('${side}',${line.tempId},'subTag',this.value)" onchange="this.value=normalizeSubLabel(this.value); updateLineField('${side}',${line.tempId},'subTag',this.value)">
     ${taxTypeSelectHtml(side, line.tempId, line.taxType)}
     <button onclick="removeLine('${side}',${line.tempId})">✕</button>
   </div>`;
@@ -1228,8 +1285,8 @@ function resetEntryForm(){
   document.getElementById('entryDate').valueAsDate = new Date();
   document.getElementById('entryFiscalYear').value = new Date().getFullYear();
   document.getElementById('entryDesc').value = '';
-  debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
-  creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
+  debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
+  creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
   renderDebitLines(); renderCreditLines();
   document.getElementById('entryFormTitle').textContent = '仕訳を入力';
   document.getElementById('saveEntryBtn').textContent = 'この仕訳を登録';
@@ -1243,8 +1300,8 @@ function loadEntryIntoForm(entry, isCopy){
   document.getElementById('entryDate').value = isCopy ? new Date().toISOString().slice(0,10) : entry.date;
   document.getElementById('entryFiscalYear').value = entry.fiscalYear || entry.date.slice(0,4);
   document.getElementById('entryDesc').value = entry.description || '';
-  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', taxType:l.taxType||''}));
-  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', taxType:l.taxType||''}));
+  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
+  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
   renderDebitLines(); renderCreditLines();
   document.getElementById('entryFormTitle').textContent = isCopy ? '仕訳を複製して登録' : '仕訳を編集';
   document.getElementById('saveEntryBtn').textContent = isCopy ? 'この仕訳を新規登録' : '更新する';
@@ -1263,8 +1320,8 @@ function saveEntry(){
   const date = document.getElementById('entryDate').value;
   const fiscalYear = String(document.getElementById('entryFiscalYear').value || date.slice(0,4));
   const description = document.getElementById('entryDesc').value.trim();
-  const dLines = debitFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), taxType:l.taxType||''}));
-  const cLines = creditFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), taxType:l.taxType||''}));
+  const dLines = debitFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), subTag:(l.subTag||'').trim(), taxType:l.taxType||''}));
+  const cLines = creditFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), subTag:(l.subTag||'').trim(), taxType:l.taxType||''}));
 
   if(!date){ alert('日付を入力してください'); return; }
   if(dLines.length===0 || cLines.length===0){ alert('借方・貸方それぞれ1行以上、科目と金額(0より大きい数)を入力してください'); return; }
@@ -1409,9 +1466,8 @@ function confirmPasteImport(){
     }
   });
   if(toCreate.length===0){ alert('登録できる行がありません'); return; }
-  const batch = db.batch();
-  toCreate.forEach(row=>{ const ref = companyDoc().collection('entries').doc(); batch.set(ref, row); });
-  batch.commit().then(()=>{
+  const ops = toCreate.map(row=>({type:'set', ref: companyDoc().collection('entries').doc(), data:row}));
+  commitInChunks(ops).then(()=>{
     alert(`${toCreate.length}件の仕訳を登録しました`);
     document.getElementById('pasteArea').value = '';
     pasteRows = [];
@@ -1517,16 +1573,14 @@ function registerBankRows(){
   const ready = pendingBankRows.filter(r=>r.counterAccountId);
   const skipped = pendingBankRows.length - ready.length;
   if(ready.length===0){ alert('相手科目が設定された行がありません'); return; }
-  const batch = db.batch();
-  ready.forEach(r=>{
+  const ops = ready.map(r=>{
     const amount = r.amountIn>0 ? r.amountIn : r.amountOut;
     const payload = r.amountIn>0
       ? { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:bankAccId, amount, tag:''}], creditLines:[{accountId:r.counterAccountId, amount, tag:''}] }
       : { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:r.counterAccountId, amount, tag:''}], creditLines:[{accountId:bankAccId, amount, tag:''}] };
-    const ref = companyDoc().collection('entries').doc();
-    batch.set(ref, payload);
+    return { type:'set', ref: companyDoc().collection('entries').doc(), data: payload };
   });
-  batch.commit().then(()=>{
+  commitInChunks(ops).then(()=>{
     alert(`${ready.length}件を登録しました${skipped?`(相手科目未設定のため ${skipped}件は未登録)`:''}`);
     document.getElementById('bankPasteArea').value = '';
     pendingBankRows = [];
@@ -1767,23 +1821,42 @@ function deleteFiscalPeriod(number){
 }
 
 
+// 対応づけのルール:
+//  1) 「詳細(何月分など)」が同じもの同士を先に対応づける(毎月払い・年金など)
+//  2) 残りは日付の古い順(先入れ先出し)で対応づける(年末に一括払いする所得税など)
 function fifoMatchPairs(occ, normalSide){
-  const inc = occ.filter(o=>o.side===normalSide).map(o=>({...o, remaining:o.amount})).sort((a,b)=>a.date.localeCompare(b.date));
-  const out = occ.filter(o=>o.side!==normalSide).map(o=>({...o, remaining:o.amount})).sort((a,b)=>a.date.localeCompare(b.date));
+  const byDate = (a,b)=>a.date.localeCompare(b.date);
+  const inc = occ.filter(o=>o.side===normalSide).map(o=>({...o, remaining:o.amount})).sort(byDate);
+  const out = occ.filter(o=>o.side!==normalSide).map(o=>({...o, remaining:o.amount})).sort(byDate);
   const pairs = [];
-  let ii=0, oi=0;
-  while(ii<inc.length && oi<out.length){
-    const a = inc[ii], b = out[oi];
+  const consume = (a,b)=>{
     const amt = Math.min(a.remaining, b.remaining);
-    pairs.push({ inDate:a.date, inDesc:a.desc, outDate:b.date, outDesc:b.desc, amount:amt });
+    if(amt<=0.0001) return;
+    pairs.push({ inDate:a.date, inDesc:a.desc, inSub:a.subTag, outDate:b.date, outDesc:b.desc, outSub:b.subTag, amount:amt });
     a.remaining -= amt; b.remaining -= amt;
+  };
+  // 1) 詳細が一致するもの同士
+  out.forEach(b=>{
+    if(!b.subTag) return;
+    inc.forEach(a=>{ if(b.remaining>0.0001 && a.remaining>0.0001 && a.subTag===b.subTag) consume(a,b); });
+  });
+  // 2) 残りは先入れ先出し
+  const incLeft = inc.filter(a=>a.remaining>0.0001);
+  const outLeft = out.filter(b=>b.remaining>0.0001);
+  let ii=0, oi=0;
+  while(ii<incLeft.length && oi<outLeft.length){
+    const a = incLeft[ii], b = outLeft[oi];
+    consume(a,b);
     if(a.remaining<=0.0001) ii++;
     if(b.remaining<=0.0001) oi++;
   }
+  pairs.sort((x,y)=> x.outDate.localeCompare(y.outDate) || x.inDate.localeCompare(y.inDate));
   const openIn = inc.filter(a=>a.remaining>0.0001);
   const openOut = out.filter(b=>b.remaining>0.0001);
   return { pairs, openIn, openOut };
 }
+
+function subTagBadge(sub){ return sub ? ` <span style="color:var(--accent);font-weight:700;">[${escapeHtml(sub)}]</span>` : ''; }
 
 function renderMatchingSection(occForTag, isDebitNormal, tagLabel){
   const area = document.getElementById('matchingArea');
@@ -1791,19 +1864,113 @@ function renderMatchingSection(occForTag, isDebitNormal, tagLabel){
   if(pairs.length===0 && openIn.length===0 && openOut.length===0){ area.innerHTML=''; return; }
   const inLabel = isDebitNormal ? '発生(借方)' : '受入(貸方)';
   const outLabel = isDebitNormal ? '使用(貸方)' : '使用(借方)';
-  let html = `<div class="matching-box"><div class="mb-title">「${escapeHtml(tagLabel)}」の入出金の対応(先入れ先出しで自動対応)</div>`;
+  let html = `<div class="matching-box"><div class="mb-title">「${escapeHtml(tagLabel)}」の入出金の対応(同じ詳細を優先し、残りは先入れ先出し)</div>`;
   pairs.forEach(p=>{
     html += `<div class="match-pair">
-      <span class="mp-side">${inLabel} ${p.inDate}${p.inDesc?' '+escapeHtml(p.inDesc):''}</span>
+      <span class="mp-side">${inLabel} ${p.inDate}${subTagBadge(p.inSub)}${p.inDesc?' '+escapeHtml(p.inDesc):''}</span>
       <span>→</span>
-      <span class="mp-side">${outLabel} ${p.outDate}${p.outDesc?' '+escapeHtml(p.outDesc):''}</span>
+      <span class="mp-side">${outLabel} ${p.outDate}${subTagBadge(p.outSub)}${p.outDesc?' '+escapeHtml(p.outDesc):''}</span>
       <span style="text-align:right;">${fmtYen(p.amount)}</span>
     </div>`;
   });
-  openIn.forEach(o=>{ html += `<div class="match-open">● ${inLabel} ${o.date}${o.desc?' '+escapeHtml(o.desc):''} — まだ使われていません(残り ${fmtYen(o.remaining)})</div>`; });
-  openOut.forEach(o=>{ html += `<div class="match-anomaly">⚠ ${outLabel} ${o.date}${o.desc?' '+escapeHtml(o.desc):''} — 対応する${inLabel}が見つかりません(${fmtYen(o.remaining)})</div>`; });
+  openIn.forEach(o=>{ html += `<div class="match-open">● ${inLabel} ${o.date}${subTagBadge(o.subTag)}${o.desc?' '+escapeHtml(o.desc):''} — まだ使われていません(残り ${fmtYen(o.remaining)})</div>`; });
+  openOut.forEach(o=>{ html += `<div class="match-anomaly">⚠ ${outLabel} ${o.date}${subTagBadge(o.subTag)}${o.desc?' '+escapeHtml(o.desc):''} — 対応する${inLabel}が見つかりません(${fmtYen(o.remaining)})</div>`; });
   html += '</div>';
   area.innerHTML = html;
+}
+
+/* ---------------- 補助タグの整理 ---------------- */
+const MONTH_RE = /(\d{4}\s*[年\/\-.]\s*\d{1,2}\s*月?\s*分?|\d{1,2}\s*月\s*分)/;
+// 表記ゆれを統一する(詳細が同じ文字列でないと月ごとの対応づけが効かないため)
+//   "2025-06" "2025/6月分" "2025年6月" → "2025年6月分" / "6月" "6月分" → "6月分"
+function normalizeSubLabel(t){
+  t = (t||'').trim();
+  let m = /^(\d{4})\s*[年\/\-.]\s*(\d{1,2})\s*月?\s*分?$/.exec(t);
+  if(m) return `${m[1]}年${parseInt(m[2],10)}月分`;
+  m = /^(\d{1,2})\s*月\s*分?$/.exec(t);
+  if(m) return `${parseInt(m[1],10)}月分`;
+  return t;
+}
+// 例) "年金2025年1月分" → {tag:"年金", sub:"2025年1月分"} / "山田/2025-03/所得税" → {tag:"所得税", sub:"2025年3月分"}
+function splitTagSuggestion(tag){
+  const whole = tag.match(MONTH_RE);
+  // 「/」が日付の一部(2025/6月分)ではなく区切りとして使われている場合
+  if(tag.includes('/') && !(whole && whole[0].includes('/'))){
+    const parts = tag.split('/').map(p=>p.trim()).filter(Boolean);
+    const idx = parts.findIndex(p=>MONTH_RE.test(p));
+    if(idx>=0){
+      const rest = parts.filter((_,i)=>i!==idx);
+      return { tag: rest[rest.length-1] || tag, sub: normalizeSubLabel(parts[idx]) };
+    }
+    return { tag, sub:'' };
+  }
+  if(!whole) return { tag, sub:'' };
+  const base = tag.replace(whole[0],'').replace(/^[\s　・_\-]+|[\s　・_\-]+$/g,'');
+  return { tag: base || tag, sub: normalizeSubLabel(whole[0]) };
+}
+let tagCleanupRows = []; // {oldTag, count, total, newTag, newSub}
+function buildTagCleanup(){
+  const accId = document.getElementById('ledgerAccountSelect').value;
+  const area = document.getElementById('tagCleanupArea');
+  if(!accId){ area.innerHTML = '<p class="empty-msg">先に上の「科目」を選んでください</p>'; return; }
+  const groups = {};
+  accountOccurrences(accId).forEach(o=>{
+    if(!o.tag || o.subTag) return; // タグ無し・すでに詳細ありは対象外
+    const g = groups[o.tag] = groups[o.tag] || { oldTag:o.tag, count:0, total:0 };
+    g.count++; g.total += o.amount;
+  });
+  tagCleanupRows = Object.values(groups).map(g=>{
+    const sg = splitTagSuggestion(g.oldTag);
+    return { ...g, newTag: sg.tag, newSub: sg.sub };
+  }).sort((a,b)=>a.oldTag.localeCompare(b.oldTag,'ja'));
+  renderTagCleanup();
+}
+function renderTagCleanup(){
+  const area = document.getElementById('tagCleanupArea');
+  if(tagCleanupRows.length===0){ area.innerHTML = '<p class="empty-msg">整理の対象になるタグがありません(詳細が未入力のタグがありません)</p>'; return; }
+  let html = '<div class="table-wrap"><table><tr><th class="left">今のタグ</th><th>件数</th><th class="left">→ 補助(大分類)</th><th class="left">詳細(何月分など)</th></tr>';
+  tagCleanupRows.forEach((r,i)=>{
+    const changed = r.newTag!==r.oldTag || r.newSub;
+    html += `<tr class="${changed?'row-ok':''}">
+      <td class="left">${escapeHtml(r.oldTag)}</td>
+      <td>${r.count}</td>
+      <td class="left"><input type="text" list="tagOptions" style="width:150px;" value="${escapeHtml(r.newTag)}" oninput="tagCleanupRows[${i}].newTag=this.value"></td>
+      <td class="left"><input type="text" list="subTagOptions" style="width:150px;" value="${escapeHtml(r.newSub)}" oninput="tagCleanupRows[${i}].newSub=this.value"></td>
+    </tr>`;
+  });
+  html += '</table></div><button class="btn-primary" style="margin-top:12px;" onclick="applyTagCleanup()">この内容で更新</button>';
+  area.innerHTML = html;
+}
+async function applyTagCleanup(){
+  const accId = document.getElementById('ledgerAccountSelect').value;
+  const map = {};
+  tagCleanupRows.forEach(r=>{
+    const nt = (r.newTag||'').trim(), ns = (r.newSub||'').trim();
+    if(nt && (nt!==r.oldTag || ns)) map[r.oldTag] = { tag:nt, sub:ns };
+  });
+  if(Object.keys(map).length===0){ alert('変更する内容がありません'); return; }
+  const updates = [];
+  entries.forEach(e=>{
+    let changed = false;
+    const fix = arr => arr.map(l=>{
+      if(l.accountId===accId && l.tag && !l.subTag && map[l.tag]){
+        changed = true;
+        return { ...l, tag: map[l.tag].tag, subTag: map[l.tag].sub };
+      }
+      return l;
+    });
+    const d = fix(e.debitLines), c = fix(e.creditLines);
+    if(changed) updates.push({ id:e.id, debitLines:d, creditLines:c });
+  });
+  if(updates.length===0){ alert('対象の仕訳がありません'); return; }
+  if(!confirm(`${updates.length}件の仕訳のタグを更新します。よろしいですか?`)) return;
+  for(let i=0;i<updates.length;i+=400){
+    const batch = db.batch();
+    updates.slice(i,i+400).forEach(u=>batch.update(companyDoc().collection('entries').doc(u.id), { debitLines:u.debitLines, creditLines:u.creditLines }));
+    await batch.commit();
+  }
+  tagCleanupRows = [];
+  document.getElementById('tagCleanupArea').innerHTML = `<p class="hint" style="color:var(--accent);">${updates.length}件更新しました。</p>`;
 }
 
 /* ---------------- 総勘定元帳 ---------------- */
@@ -1811,8 +1978,8 @@ function accountOccurrences(accId){
   // 選択科目に関わる全仕訳の行(借方/貸方どちらでも)を平坦化。年度フィルタなし(未決済一覧・タグ抽出用)
   const occ = [];
   entries.forEach(e=>{
-    e.debitLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'debit', amount:l.amount, tag:l.tag||'', counter:e.creditLines.map(c=>accountName(c.accountId)).join(' / ')}); });
-    e.creditLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'credit', amount:l.amount, tag:l.tag||'', counter:e.debitLines.map(c=>accountName(c.accountId)).join(' / ')}); });
+    e.debitLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'debit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.creditLines.map(c=>accountName(c.accountId)).join(' / ')}); });
+    e.creditLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'credit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.debitLines.map(c=>accountName(c.accountId)).join(' / ')}); });
   });
   occ.sort((a,b)=>a.date.localeCompare(b.date));
   return occ;
@@ -1857,8 +2024,16 @@ function renderLedger(){
     if(openTags.length===0){
       oiHtml = `<div class="open-items"><div class="oi-title">未決済一覧</div><span class="match-ok">✓ すべて決済済み(残高0)です</span></div>`;
     } else {
-      oiHtml = `<div class="open-items"><div class="oi-title">未決済一覧(残高が残っている補助・取引先)</div>` +
-        openTags.map(([tag,bal])=>`<div class="open-item-row"><span class="oi-tag">${escapeHtml(tag)}</span><span class="oi-amt">${fmtYen(bal)}</span></div>`).join('') +
+      oiHtml = `<div class="open-items"><div class="oi-title">未決済一覧(補助ごとに残高が残っているもの)</div>` +
+        openTags.map(([tag,bal])=>{
+          const occTag = allOcc.filter(o=>(o.tag||'(タグなし)')===tag);
+          const { openIn, openOut } = fifoMatchPairs(occTag, isDebitNormal?'debit':'credit');
+          const label = o=>`${escapeHtml(o.subTag||o.date)} ${fmtYen(o.remaining)}`;
+          let detail = '';
+          if(openIn.length) detail += `<div class="oi-detail">まだ精算されていない内訳: ${openIn.map(label).join(' ／ ')}</div>`;
+          if(openOut.length) detail += `<div class="oi-detail" style="color:var(--danger);">⚠ 受入より多く支払っている分: ${openOut.map(label).join(' ／ ')}</div>`;
+          return `<div class="open-item-row"><span class="oi-tag">${escapeHtml(tag)}</span><span class="oi-amt">${fmtYen(bal)}</span></div>${detail}`;
+        }).join('') +
         `</div>`;
     }
   }
@@ -1872,7 +2047,7 @@ function renderLedger(){
   }
 
   const occ = allOcc.filter(o => (year==='all' || o.fiscalYear===year) && (!tagFilter || o.tag===tagFilter));
-  let html = '<tr><th class="left">日付</th><th class="left">摘要</th><th class="left">補助</th><th class="left">相手科目</th><th>借方</th><th>貸方</th><th>残高</th></tr>';
+  let html = '<tr><th class="left">日付</th><th class="left">摘要</th><th class="left">補助</th><th class="left">詳細</th><th class="left">相手科目</th><th>借方</th><th>貸方</th><th>残高</th></tr>';
 
   let balance = 0;
   // 資産・負債・資本科目かつ特定年度を選んでいる場合は、前年度以前の累積残高(+期首残高)を開始行として表示
@@ -1884,11 +2059,11 @@ function renderLedger(){
     let openingNote = '前年度以前の累積';
     if(!tagFilter && openYear && year>=openYear){ openingBalance += openingBalanceFor(accId); openingNote = '期首残高を含む'; }
     balance = openingBalance;
-    html += `<tr class="opening-row"><td class="left" colspan="6">${year}年度 開始時点の残高(${openingNote})</td><td>${fmtYen(openingBalance)}</td></tr>`;
+    html += `<tr class="opening-row"><td class="left" colspan="7">${year}年度 開始時点の残高(${openingNote})</td><td>${fmtYen(openingBalance)}</td></tr>`;
   }
 
   if(occ.length===0){
-    html += '<tr><td colspan="7" class="empty-msg">該当する記帳がありません</td></tr>';
+    html += '<tr><td colspan="8" class="empty-msg">該当する記帳がありません</td></tr>';
   }
   occ.forEach(o=>{
     balance += isDebitNormal ? (o.side==='debit'?o.amount:-o.amount) : (o.side==='credit'?o.amount:-o.amount);
@@ -1896,6 +2071,7 @@ function renderLedger(){
       <td class="left">${o.date}</td>
       <td class="left">${escapeHtml(o.desc||'')}</td>
       <td class="left">${escapeHtml(o.tag||'')}</td>
+      <td class="left">${escapeHtml(o.subTag||'')}</td>
       <td class="left">${escapeHtml(o.counter)}</td>
       <td>${o.side==='debit'?fmtYen(o.amount):''}</td>
       <td>${o.side==='credit'?fmtYen(o.amount):''}</td>
@@ -2280,10 +2456,9 @@ function applyTaxBulk(){
   if(targets.length===0){ alert('行を選択してください'); return; }
   const byEntry = {};
   targets.forEach(m=>{ (byEntry[m.entryId]=byEntry[m.entryId]||[]).push(m); });
-  const batch = db.batch();
-  Object.entries(byEntry).forEach(([entryId, mods])=>{
+  const ops = Object.entries(byEntry).map(([entryId, mods])=>{
     const e = entries.find(x=>x.id===entryId);
-    if(!e) return;
+    if(!e) return null;
     const newDebit = e.debitLines.map((l,i)=>{
       const mod = mods.find(m=>m.side==='debit'&&m.lineIndex===i);
       return mod ? {...l, taxType:newType} : l;
@@ -2292,9 +2467,9 @@ function applyTaxBulk(){
       const mod = mods.find(m=>m.side==='credit'&&m.lineIndex===i);
       return mod ? {...l, taxType:newType} : l;
     });
-    batch.update(companyDoc().collection('entries').doc(entryId), {debitLines:newDebit, creditLines:newCredit});
-  });
-  batch.commit().then(()=>{
+    return { type:'update', ref: companyDoc().collection('entries').doc(entryId), data:{debitLines:newDebit, creditLines:newCredit} };
+  }).filter(Boolean);
+  commitInChunks(ops).then(()=>{
     alert(`${targets.length}行を更新しました`);
     taxBulkMatches = [];
     document.getElementById('taxBulkResultsArea').innerHTML = '<p class="empty-msg">更新しました。必要ならもう一度検索してください。</p>';
@@ -2321,7 +2496,7 @@ function renderEmployeeTable(){
 }
 function renderEmployeeSelects(){
   const opts = employees.map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
-  ['payslipEmployeeSelect','ledgerEmployeeFilter','withholdingEmployeeSelect'].forEach(id=>{
+  ['payslipEmployeeSelect','ledgerEmployeeFilter','withholdingEmployeeSelect','wageLedgerEmployeeSelect'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     const prev = el.value;
@@ -2497,16 +2672,15 @@ function createAllDepreciationEntries(){
   if(targets.length===0){ alert('作成できる仕訳がありません(すべて償却済み、または対象資産がありません)'); return; }
   if(!confirm(`${targets.length}件の減価償却の仕訳を作成します。よろしいですか?`)) return;
   const { end } = periodBoundsFor(fy);
-  const batch = db.batch();
-  targets.forEach(({a, calc})=>{
-    const ref = companyDoc().collection('entries').doc();
-    batch.set(ref, {
+  const ops = targets.map(({a, calc})=>({
+    type:'set', ref: companyDoc().collection('entries').doc(),
+    data: {
       date: end, fiscalYear: fy, description: `${a.name} 減価償却費`,
       debitLines: [{accountId: a.expenseAccountId, amount: calc.amount, tag: a.name}],
       creditLines: [{accountId: a.accountId, amount: calc.amount, tag: a.name}]
-    });
-  });
-  batch.commit().then(()=>{ alert(`${targets.length}件の仕訳を作成しました`); });
+    }
+  }));
+  commitInChunks(ops).then(()=>{ alert(`${targets.length}件の仕訳を作成しました`); });
 }
 
 let payFormLines = [];
@@ -2520,10 +2694,12 @@ function resetPayslipForm(){
   editingPayslipId = null;
   document.getElementById('payslipYearMonth').value = new Date().toISOString().slice(0,7);
   document.getElementById('payslipPayDate').valueAsDate = new Date();
+  ['payslipWorkDays','payslipRegularHours','payslipOvertimeHours','payslipNightHours','payslipHolidayHours'].forEach(id=>{ document.getElementById(id).value=''; });
   payFormLines = defaultPayLines();
   deductFormLines = defaultDeductLines();
   renderPayLines('pay'); renderPayLines('deduct');
   document.getElementById('payslipFormTitle').textContent = '給与明細を作成';
+  document.getElementById('payslipEntryLinkArea').innerHTML = '';
 }
 function addPayLine(kind){
   const line = {tempId:++payLineIdCounter, label:'', amount:''};
@@ -2560,48 +2736,78 @@ function recalcPayroll(){
   document.getElementById('deductSumTotal').textContent = fmtYen(deductTotal);
   document.getElementById('netPayIndicator').textContent = `差引支給額: ${fmtYen(payTotal-deductTotal)}`;
 }
-function savePayslip(){
+function collectPayslipPayload(){
   const employeeId = document.getElementById('payslipEmployeeSelect').value;
   const yearMonth = document.getElementById('payslipYearMonth').value;
   const payDate = document.getElementById('payslipPayDate').value;
-  if(!employeeId){ alert('従業員を選択してください'); return; }
-  if(!yearMonth){ alert('対象年月を入力してください'); return; }
+  if(!employeeId){ alert('従業員を選択してください'); return null; }
+  if(!yearMonth){ alert('対象年月を入力してください'); return null; }
   const employee = employees.find(e=>e.id===employeeId);
   const payItems = payFormLines.filter(l=>l.label && parseFloat(l.amount)>0).map(l=>({label:l.label.trim(), amount:parseFloat(l.amount)}));
   const deductItems = deductFormLines.filter(l=>l.label && parseFloat(l.amount)>0).map(l=>({label:l.label.trim(), amount:parseFloat(l.amount)}));
   const grossTotal = payItems.reduce((s,l)=>s+l.amount,0);
   const deductTotal = deductItems.reduce((s,l)=>s+l.amount,0);
   const netPay = grossTotal - deductTotal;
-  const payload = { employeeId, employeeName: employee?employee.name:'', yearMonth, fiscalYear: deriveFiscalYear(payDate||(yearMonth+'-15')), payDate, payItems, deductItems, grossTotal, deductTotal, netPay };
-  const promise = editingPayslipId ? companyDoc().collection('payslips').doc(editingPayslipId).set(payload) : companyDoc().collection('payslips').add(payload);
-  promise.then(()=>{ alert('保存しました'); resetPayslipForm(); });
+  const numOrNull = id => { const v = document.getElementById(id).value; return v==='' ? null : parseFloat(v); };
+  return {
+    employeeId, employeeName: employee?employee.name:'', yearMonth, fiscalYear: deriveFiscalYear(payDate||(yearMonth+'-15')), payDate,
+    workDays: numOrNull('payslipWorkDays'), regularHours: numOrNull('payslipRegularHours'),
+    overtimeHours: numOrNull('payslipOvertimeHours'), nightHours: numOrNull('payslipNightHours'), holidayHours: numOrNull('payslipHolidayHours'),
+    payItems, deductItems, grossTotal, deductTotal, netPay
+  };
 }
-function loadPayslipToJournal(){
-  const employeeId = document.getElementById('payslipEmployeeSelect').value;
-  const employee = employees.find(e=>e.id===employeeId);
-  const yearMonth = document.getElementById('payslipYearMonth').value;
+function buildJournalFromPayslip(payload){
+  const employee = employees.find(e=>e.id===payload.employeeId);
   const paySourceId = document.getElementById('paySourceAccountSelect').value;
   const depositId = document.getElementById('payDepositAccountSelect').value;
   const paymentId = document.getElementById('payPaymentAccountSelect').value;
-  const payDate = document.getElementById('payslipPayDate').value || (yearMonth ? yearMonth+'-25' : new Date().toISOString().slice(0,10));
-  if(!employee){ alert('従業員を選択してください'); return; }
-  if(!paySourceId || !depositId || !paymentId){ alert('仕訳作成用の科目(支給科目・預り金科目・支払口座)をすべて選択してください'); return; }
-  const payItems = payFormLines.filter(l=>l.label && parseFloat(l.amount)>0);
-  const deductItems = deductFormLines.filter(l=>l.label && parseFloat(l.amount)>0);
-  const grossTotal = payItems.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
-  const deductTotal = deductItems.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
-  const netPay = grossTotal - deductTotal;
-  if(grossTotal<=0){ alert('支給額を入力してください'); return; }
-  const tempEntry = {
-    id: null, date: payDate, fiscalYear: deriveFiscalYear(payDate),
-    description: `${employee.name} ${yearMonth} 給与`,
-    debitLines: [{accountId: paySourceId, amount: grossTotal, tag: employee.name}],
+  const payDate = payload.payDate || (payload.yearMonth ? payload.yearMonth+'-25' : new Date().toISOString().slice(0,10));
+  if(!paySourceId || !depositId || !paymentId){ alert('仕訳作成用の科目(支給科目・預り金科目・支払口座)をすべて選択してください'); return null; }
+  if(payload.grossTotal<=0){ alert('支給額を入力してください'); return null; }
+  return {
+    date: payDate, fiscalYear: deriveFiscalYear(payDate),
+    description: `${payload.employeeName} ${payload.yearMonth} 給与`,
+    debitLines: [{accountId: paySourceId, amount: payload.grossTotal, tag: payload.employeeName}],
     creditLines: [
-      ...deductItems.map(l=>({accountId: depositId, amount: parseFloat(l.amount), tag: `${employee.name}/${yearMonth}/${l.label}`})),
-      ...(netPay>0 ? [{accountId: paymentId, amount: netPay, tag: employee.name}] : [])
+      ...payload.deductItems.map(l=>({accountId: depositId, amount: l.amount, tag: l.label, subTag: monthLabel(payload.yearMonth)})),
+      ...(payload.netPay>0 ? [{accountId: paymentId, amount: payload.netPay, tag: payload.employeeName}] : [])
     ]
   };
-  loadEntryIntoForm(tempEntry, true);
+}
+function savePayslip(){
+  const payload = collectPayslipPayload();
+  if(!payload) return;
+  const promise = editingPayslipId ? companyDoc().collection('payslips').doc(editingPayslipId).set(payload, {merge:true}) : companyDoc().collection('payslips').add(payload);
+  promise.then(()=>{ alert('保存しました'); resetPayslipForm(); });
+}
+function savePayslipAndCreateEntry(){
+  const payload = collectPayslipPayload();
+  if(!payload) return;
+  const entryData = buildJournalFromPayslip(payload);
+  if(!entryData) return;
+  companyDoc().collection('entries').add(entryData).then(entryRef=>{
+    const full = { ...payload, journalEntryId: entryRef.id };
+    const promise = editingPayslipId ? companyDoc().collection('payslips').doc(editingPayslipId).set(full, {merge:true}) : companyDoc().collection('payslips').add(full);
+    return promise;
+  }).then(()=>{ alert('明細を保存し、仕訳も作成しました'); resetPayslipForm(); });
+}
+function loadPayslipToJournal(){
+  const payload = collectPayslipPayload();
+  if(!payload) return;
+  const entryData = buildJournalFromPayslip(payload);
+  if(!entryData) return;
+  loadEntryIntoForm({ id:null, ...entryData }, true);
+}
+function renderPayslipEntryLink(p){
+  const area = document.getElementById('payslipEntryLinkArea');
+  if(!area) return;
+  if(p && p.journalEntryId && entries.some(e=>e.id===p.journalEntryId)){
+    area.innerHTML = `<span class="match-ok">✓ 仕訳作成済み</span> <button class="btn-outline btn-sm" onclick="editEntry('${p.journalEntryId}')">その仕訳を見る・編集する</button>`;
+  } else if(p && p.journalEntryId){
+    area.innerHTML = `<span class="match-bad">⚠ 紐づいていた仕訳が見つかりません(削除された可能性があります)</span>`;
+  } else {
+    area.innerHTML = '';
+  }
 }
 function editPayslip(id){
   const p = payslips.find(x=>x.id===id);
@@ -2610,43 +2816,58 @@ function editPayslip(id){
   document.getElementById('payslipEmployeeSelect').value = p.employeeId;
   document.getElementById('payslipYearMonth').value = p.yearMonth;
   document.getElementById('payslipPayDate').value = p.payDate || '';
+  document.getElementById('payslipWorkDays').value = p.workDays!=null ? p.workDays : '';
+  document.getElementById('payslipRegularHours').value = p.regularHours!=null ? p.regularHours : '';
+  document.getElementById('payslipOvertimeHours').value = p.overtimeHours!=null ? p.overtimeHours : '';
+  document.getElementById('payslipNightHours').value = p.nightHours!=null ? p.nightHours : '';
+  document.getElementById('payslipHolidayHours').value = p.holidayHours!=null ? p.holidayHours : '';
   payFormLines = p.payItems.map(l=>({tempId:++payLineIdCounter, label:l.label, amount:l.amount}));
   deductFormLines = p.deductItems.map(l=>({tempId:++payLineIdCounter, label:l.label, amount:l.amount}));
   renderPayLines('pay'); renderPayLines('deduct');
   document.getElementById('payslipFormTitle').textContent = '給与明細を編集';
+  renderPayslipEntryLink(p);
   switchTab('tab-payroll');
   window.scrollTo({top:0, behavior:'smooth'});
 }
-function deletePayslip(id){ if(confirm('この給与明細を削除しますか?')) companyDoc().collection('payslips').doc(id).delete(); }
+function deletePayslip(id){
+  const p = payslips.find(x=>x.id===id);
+  const hasEntry = p && p.journalEntryId && entries.some(e=>e.id===p.journalEntryId);
+  const msg = hasEntry ? 'この給与明細を削除しますか?(紐づいている仕訳は削除されません。別途、仕訳帳から削除してください)' : 'この給与明細を削除しますか?';
+  if(confirm(msg)) companyDoc().collection('payslips').doc(id).delete();
+}
 
 function renderPayslipLedger(){
   const empSel = document.getElementById('ledgerEmployeeFilter');
   const yearSel = document.getElementById('ledgerPayrollYearFilter');
   const whYearSel = document.getElementById('withholdingYearSelect');
+  const wageYearSel = document.getElementById('wageLedgerYearSelect');
   if(!empSel || !yearSel) return;
   const years = Array.from(new Set(payslips.map(p=>p.fiscalYear).filter(Boolean))).sort();
   const prevY = yearSel.value;
   yearSel.innerHTML = '<option value="all">すべて</option>' + years.map(y=>`<option value="${y}">${y}年</option>`).join('');
   yearSel.value = (years.includes(prevY) || prevY==='all') ? (prevY||'all') : 'all';
-  if(whYearSel){
-    const prevWy = whYearSel.value;
-    whYearSel.innerHTML = years.map(y=>`<option value="${y}">${y}年</option>`).join('');
-    whYearSel.value = years.includes(prevWy) ? prevWy : (years[years.length-1]||'');
-  }
+  [whYearSel, wageYearSel].forEach(sel=>{
+    if(!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = years.map(y=>`<option value="${y}">${y}年</option>`).join('');
+    sel.value = years.includes(prev) ? prev : (years[years.length-1]||'');
+  });
 
   const empFilter = empSel.value || 'all';
   const yearFilter = yearSel.value || 'all';
   const rows = payslips.filter(p => (empFilter==='all'||p.employeeId===empFilter) && (yearFilter==='all'||p.fiscalYear===yearFilter))
     .sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-  let html = '<tr><th class="left">対象年月</th><th class="left">氏名</th><th>支給合計</th><th>控除合計</th><th>差引支給額</th><th></th></tr>';
-  if(rows.length===0){ html += '<tr><td colspan="6" class="empty-msg">明細がありません</td></tr>'; }
+  let html = '<tr><th class="left">対象年月</th><th class="left">氏名</th><th>支給合計</th><th>控除合計</th><th>差引支給額</th><th class="left">仕訳</th><th></th></tr>';
+  if(rows.length===0){ html += '<tr><td colspan="7" class="empty-msg">明細がありません</td></tr>'; }
   rows.forEach(p=>{
+    const linked = p.journalEntryId && entries.some(e=>e.id===p.journalEntryId);
     html += `<tr>
       <td class="left">${p.yearMonth}</td>
       <td class="left">${escapeHtml(p.employeeName)}</td>
       <td>${fmtYen(p.grossTotal)}</td>
       <td>${fmtYen(p.deductTotal)}</td>
       <td>${fmtYen(p.netPay)}</td>
+      <td class="left">${linked ? `<span class="match-ok">済</span> <button class="btn-outline btn-sm" onclick="editEntry('${p.journalEntryId}')">見る</button>` : '<span style="color:var(--muted);">未作成</span>'}</td>
       <td style="white-space:nowrap;">
         <button class="btn-outline btn-sm" onclick="printPayslip('${p.id}')">印刷</button>
         <button class="btn-outline btn-sm" onclick="editPayslip('${p.id}')">編集</button>
@@ -2675,6 +2896,69 @@ function printPayslip(id){
   win.document.close();
 }
 
+/* ---------------- 賃金台帳 ---------------- */
+function hoursCell(v){ return (v===null || v===undefined || v==='') ? '' : v; }
+function wageLedgerRows(empId, year){
+  return payslips.filter(p=>p.employeeId===empId && p.fiscalYear===year).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+}
+function wageLedgerLabels(rows){
+  const payLabels = [...new Set(rows.flatMap(p=>p.payItems.map(l=>l.label)))];
+  const deductLabels = [...new Set(rows.flatMap(p=>p.deductItems.map(l=>l.label)))];
+  return { payLabels, deductLabels };
+}
+function wageLedgerTableHtml(employee, rows){
+  if(rows.length===0) return '<p class="empty-msg">対象年の給与明細がありません</p>';
+  const { payLabels, deductLabels } = wageLedgerLabels(rows);
+  let html = '<div class="table-wrap"><table><tr>';
+  html += '<th class="left">賃金計算期間</th><th>労働日数</th><th>労働時間数</th><th>時間外</th><th>深夜</th><th>休日</th>';
+  payLabels.forEach(l=>{ html += `<th class="left">${escapeHtml(l)}</th>`; });
+  html += '<th>支給合計</th>';
+  deductLabels.forEach(l=>{ html += `<th class="left">${escapeHtml(l)}</th>`; });
+  html += '<th>控除合計</th><th>差引支給額</th></tr>';
+  rows.forEach(p=>{
+    const findAmt = (arr,label)=>{ const f=arr.find(l=>l.label===label); return f ? fmtYen(f.amount) : ''; };
+    html += `<tr>
+      <td class="left">${p.yearMonth}</td>
+      <td>${hoursCell(p.workDays)}</td><td>${hoursCell(p.regularHours)}</td><td>${hoursCell(p.overtimeHours)}</td><td>${hoursCell(p.nightHours)}</td><td>${hoursCell(p.holidayHours)}</td>`;
+    payLabels.forEach(l=>{ html += `<td class="left">${findAmt(p.payItems,l)}</td>`; });
+    html += `<td>${fmtYen(p.grossTotal)}</td>`;
+    deductLabels.forEach(l=>{ html += `<td class="left">${findAmt(p.deductItems,l)}</td>`; });
+    html += `<td>${fmtYen(p.deductTotal)}</td><td>${fmtYen(p.netPay)}</td></tr>`;
+  });
+  const sum = (get)=>rows.reduce((s,p)=>s+(get(p)||0),0);
+  html += `<tr class="total-row"><td class="left">合計</td><td>${sum(p=>p.workDays)||''}</td><td>${sum(p=>p.regularHours)||''}</td><td>${sum(p=>p.overtimeHours)||''}</td><td>${sum(p=>p.nightHours)||''}</td><td>${sum(p=>p.holidayHours)||''}</td>`;
+  payLabels.forEach(l=>{ html += `<td>${fmtYen(rows.reduce((s,p)=>s+((p.payItems.find(x=>x.label===l)||{}).amount||0),0))}</td>`; });
+  html += `<td>${fmtYen(sum(p=>p.grossTotal))}</td>`;
+  deductLabels.forEach(l=>{ html += `<td>${fmtYen(rows.reduce((s,p)=>s+((p.deductItems.find(x=>x.label===l)||{}).amount||0),0))}</td>`; });
+  html += `<td>${fmtYen(sum(p=>p.deductTotal))}</td><td>${fmtYen(sum(p=>p.netPay))}</td></tr>`;
+  html += '</table></div>';
+  return html;
+}
+function renderWageLedger(){
+  const empId = document.getElementById('wageLedgerEmployeeSelect').value;
+  const year = document.getElementById('wageLedgerYearSelect').value;
+  const area = document.getElementById('wageLedgerArea');
+  if(!empId || !year){ area.innerHTML = '<p class="empty-msg">従業員と年を選択してください</p>'; return; }
+  const employee = employees.find(e=>e.id===empId);
+  const rows = wageLedgerRows(empId, year);
+  area.innerHTML = wageLedgerTableHtml(employee, rows) + (rows.length ? `<button class="btn-outline btn-sm" style="margin-top:10px;" onclick="printWageLedger('${empId}','${year}')">印刷</button>` : '');
+}
+function printWageLedger(empId, year){
+  const employee = employees.find(e=>e.id===empId);
+  const rows = wageLedgerRows(empId, year);
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><meta charset="UTF-8"><title>賃金台帳 ${year}年</title>
+  <style>body{font-family:sans-serif;padding:24px;} table{border-collapse:collapse;font-size:12px;} td,th{border:1px solid #ccc;padding:5px 8px;white-space:nowrap;}</style>
+  </head><body>
+  <h1>賃金台帳(${year}年分)</h1>
+  <p>氏名: ${escapeHtml(employee?employee.name:'')} ${employee&&employee.role==='officer'?'(役員)':''}</p>
+  ${wageLedgerTableHtml(employee, rows)}
+  <script>window.print();<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+/* ---------------- 源泉徴収票 ---------------- */
 function sumPayslipDeduct(rows, labelMatch){
   let s=0; rows.forEach(p=> p.deductItems.forEach(l=>{ if(l.label===labelMatch) s+=l.amount; })); return s;
 }
@@ -2740,8 +3024,8 @@ function escapeHtml(s){
 }
 
 /* 初期フォーム行 */
-debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
-creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', taxType:''}];
+debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
+creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
 payFormLines = defaultPayLines();
 deductFormLines = defaultDeductLines();
 renderPayLines('pay');
