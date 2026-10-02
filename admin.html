@@ -209,8 +209,9 @@
 
         <div id="balanceIndicator" class="balance-indicator balance-bad">借方・貸方を入力してください</div>
 
-        <div style="margin-top:14px;display:flex;gap:10px;">
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
           <button class="btn-primary" id="saveEntryBtn" onclick="saveEntry()">この仕訳を登録</button>
+          <button class="btn-outline" id="draftEntryBtn" onclick="saveEntryAsDraft()">仮保存する(内容が未確定でもOK)</button>
           <button class="btn-outline hidden" id="cancelEditBtn" onclick="resetEntryForm()">編集を取消</button>
         </div>
       </div>
@@ -276,6 +277,7 @@
             <option value="credit_account">貸方科目</option>
           </select>
         </div>
+        <div id="draftEntriesArea"></div>
         <div id="journalDupArea"></div>
         <div class="table-wrap"><table id="journalTable"></table></div>
       </div>
@@ -648,7 +650,8 @@ const DEFAULT_ACCOUNTS = [
 
 let currentUser = null;
 let accounts = [];   // {id, name, category}
-let entries = [];    // {id, date, fiscalYear, description, debitLines:[{accountId,amount}], creditLines:[{accountId,amount}]}
+let entries = [];    // {id, date, fiscalYear, description, debitLines:[{accountId,amount}], creditLines:[{accountId,amount}]} (仮保存=isDraft:trueのものは含まない)
+let draftEntries = []; // isDraft:true の仕訳(試算表等の集計には含めない)
 let unsubAccounts = null, unsubEntries = null;
 let employees = [];
 let payslips = [];
@@ -676,6 +679,7 @@ function yearLabel(y){
 }
 let pendingImportRows = [];
 let editingEntryId = null;
+let editingIsDraft = false;
 let fiscalYearManuallyEdited = false;
 let debitFormLines = [];  // {tempId, accountId, amount}
 let creditFormLines = [];
@@ -754,7 +758,7 @@ function initCompanies(){
         const target = companies.some(c=>c.id===saved) ? saved : companies[0].id;
         selectCompany(target);
       }
-    });
+    }, reportError);
 }
 
 function showModal({title, message, placeholder, defaultValue, onConfirm, confirmLabel, hideInput}){
@@ -800,7 +804,7 @@ function migrateOrCreateFirstCompany(){
           userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
             selectCompany(ref.id);
             creatingFirstCompany = false;
-          });
+          }).catch(e=>{ creatingFirstCompany=false; reportError(e); });
         }
       });
     }
@@ -811,30 +815,35 @@ function migrateOrCreateFirstCompany(){
 }
 
 async function migrateLegacyData(name){
-  const companyRef = await userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
-  const cols = ['accounts','entries','employees','payslips','fixedAssets'];
-  for(const colName of cols){
-    const snap = await userDoc().collection(colName).get();
-    if(snap.empty) continue;
-    const ops = [];
-    snap.docs.forEach(d=>{
-      ops.push({type:'set', ref: companyRef.collection(colName).doc(d.id), data: d.data()});
-      ops.push({type:'delete', ref: d.ref});
-    });
-    await commitInChunks(ops);
+  try{
+    const companyRef = await userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+    const cols = ['accounts','entries','employees','payslips'];
+    for(const colName of cols){
+      const snap = await userDoc().collection(colName).get();
+      if(snap.empty) continue;
+      const ops = [];
+      snap.docs.forEach(d=>{
+        ops.push({type:'set', ref: companyRef.collection(colName).doc(d.id), data: d.data()});
+        ops.push({type:'delete', ref: d.ref});
+      });
+      await commitInChunks(ops);
+    }
+    const metaSnap = await userDoc().collection('meta').get();
+    if(!metaSnap.empty){
+      const ops2 = [];
+      metaSnap.docs.forEach(d=>{
+        ops2.push({type:'set', ref: companyRef.collection('meta').doc(d.id), data: d.data()});
+        ops2.push({type:'delete', ref: d.ref});
+      });
+      await commitInChunks(ops2);
+    }
+    selectCompany(companyRef.id);
+    creatingFirstCompany = false;
+    showModal({title:'移行完了', message:`既存のデータを会社「${name}」として移行しました。`, hideInput:true});
+  } catch(e){
+    creatingFirstCompany = false;
+    reportError(e);
   }
-  const metaSnap = await userDoc().collection('meta').get();
-  if(!metaSnap.empty){
-    const ops2 = [];
-    metaSnap.docs.forEach(d=>{
-      ops2.push({type:'set', ref: companyRef.collection('meta').doc(d.id), data: d.data()});
-      ops2.push({type:'delete', ref: d.ref});
-    });
-    await commitInChunks(ops2);
-  }
-  selectCompany(companyRef.id);
-  creatingFirstCompany = false;
-  showModal({title:'移行完了', message:`既存のデータを会社「${name}」として移行しました。`, hideInput:true});
 }
 
 function selectCompany(id){
@@ -846,7 +855,7 @@ function selectCompany(id){
   if(unsubEmployees) unsubEmployees();
   if(unsubPayslips) unsubPayslips();
   if(unsubFixedAssets) unsubFixedAssets();
-  ensureAccountsSeeded().then(startListeners);
+  ensureAccountsSeeded().then(startListeners).catch(reportError);
 }
 function switchCompany(id){
   if(!id || id===currentCompanyId) return;
@@ -870,7 +879,7 @@ function promptCreateCompany(){
       if(!name) return;
       userDoc().collection('companies').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()}).then(ref=>{
         selectCompany(ref.id);
-      });
+      }).catch(reportError);
     }
   });
 }
@@ -880,7 +889,7 @@ function promptRenameCompany(){
   showModal({
     title:'会社名を変更',
     defaultValue:current.name,
-    onConfirm:(name)=>{ if(!name) return; userDoc().collection('companies').doc(currentCompanyId).update({name}); }
+    onConfirm:(name)=>{ if(!name) return; userDoc().collection('companies').doc(currentCompanyId).update({name}).catch(reportError); }
   });
 }
 async function deleteCompanyData(companyId){
@@ -908,8 +917,8 @@ function promptDeleteCompany(){
     onConfirm:(typed)=>{
       if(typed!==current.name){ showModal({title:'削除を中止しました', message:'会社名が一致しませんでした。', hideInput:true}); return; }
       deleteCompanyData(currentCompanyId).then(()=>{
-        userDoc().collection('companies').doc(currentCompanyId).delete();
-      });
+        return userDoc().collection('companies').doc(currentCompanyId).delete();
+      }).catch(reportError);
     }
   });
 }
@@ -918,6 +927,13 @@ function promptDeleteCompany(){
 function userDoc(){ return db.collection('corp_users').doc(currentUser.uid); }
 
 // Firestoreの1バッチは最大500件までのため、大量データはこの関数でチャンクに分けてコミットする
+// 保存に失敗したときに、必ず画面上でわかるようにするための共通処理
+function reportError(err){
+  console.error(err);
+  const msg = (err && err.message) ? err.message : String(err);
+  alert('保存に失敗しました。もう一度お試しください。\n(エラー内容: ' + msg + ')');
+}
+
 async function commitInChunks(operations, chunkSize=400){
   for(let i=0;i<operations.length;i+=chunkSize){
     const batch = db.batch();
@@ -947,7 +963,7 @@ function ensureAccountsSeeded(){
       batch.set(ref, { name, category });
     });
     return batch.commit();
-  }).catch(e => console.error('初期科目の作成に失敗:', e));
+  }).catch(e => { console.error('初期科目の作成に失敗:', e); reportError(e); });
 }
 
 function startListeners(){
@@ -969,27 +985,27 @@ function startListeners(){
       renderFixedAssetAccountSelects();
       renderFixedAssetsTable();
       renderDepreciationCalc();
-    });
+    }, reportError);
 
   unsubEmployees = companyDoc().collection('employees').orderBy('name')
     .onSnapshot(snap=>{
       employees = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderEmployeeTable();
       renderEmployeeSelects();
-    });
+    }, reportError);
 
   unsubPayslips = companyDoc().collection('payslips').orderBy('yearMonth')
     .onSnapshot(snap=>{
       payslips = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderPayslipLedger();
-    });
+    }, reportError);
 
   unsubFixedAssets = companyDoc().collection('fixedAssets').orderBy('acquisitionDate')
     .onSnapshot(snap=>{
       fixedAssets = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderFixedAssetsTable();
       renderDepreciationCalc();
-    });
+    }, reportError);
 
   companyDoc().collection('meta').doc('taxSettings').get().then(snap=>{
     const s = snap.exists ? snap.data() : {};
@@ -997,7 +1013,7 @@ function startListeners(){
     document.getElementById('taxMethod').value = s.method || 'general';
     document.getElementById('taxSimplifiedCategory').value = s.simplifiedCategory || '6';
     renderTaxCalc();
-  });
+  }).catch(reportError);
 
   companyDoc().collection('meta').doc('openingBalances').get().then(snap=>{
     openingBalanceSettings = snap.exists ? snap.data() : { fiscalYear:'', balances:{} };
@@ -1007,19 +1023,22 @@ function startListeners(){
     renderTrialBalance();
     renderBalanceSheet();
     onLedgerAccountChange();
-  });
+  }).catch(reportError);
 
   companyDoc().collection('meta').doc('fiscalPeriods').get().then(snap=>{
     fiscalPeriods = snap.exists ? (snap.data().periods||[]) : [];
     renderFiscalPeriodsTable();
     populateYearSelects();
-  });
+  }).catch(reportError);
 
   unsubEntries = companyDoc().collection('entries').orderBy('date')
     .onSnapshot(snap=>{
-      entries = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      const all = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      entries = all.filter(e=>!e.isDraft);
+      draftEntries = all.filter(e=>e.isDraft);
       populateYearSelects();
       renderJournal();
+      renderDraftEntries();
       onLedgerAccountChange();
       renderTrialBalance();
       renderPL();
@@ -1029,7 +1048,7 @@ function startListeners(){
       renderDepreciationCalc();
       renderTagDatalists();
       renderPayslipLedger();
-    });
+    }, reportError);
 }
 
 const STANDARD_TAGS = ['所得税','住民税','健康保険','厚生年金','雇用保険'];
@@ -1049,7 +1068,7 @@ function monthLabel(yearMonth){
 function accountName(id){ const a = accounts.find(x=>x.id===id); return a ? a.name : '(不明な科目)'; }
 function usedAccountIds(){
   const s = new Set();
-  entries.forEach(e=>{
+  entries.concat(draftEntries).forEach(e=>{
     (e.debitLines||[]).forEach(l=>s.add(l.accountId));
     (e.creditLines||[]).forEach(l=>s.add(l.accountId));
   });
@@ -1084,7 +1103,7 @@ function renderAccountSelects(){
 
 function accountUsageCount(id){
   let c=0;
-  entries.forEach(e=>{
+  entries.concat(draftEntries).forEach(e=>{
     e.debitLines.forEach(l=>{ if(l.accountId===id) c++; });
     e.creditLines.forEach(l=>{ if(l.accountId===id) c++; });
   });
@@ -1164,22 +1183,22 @@ function addAccount(){
   if(accounts.some(a=>a.name===name)){ alert('同じ名前の科目が既に存在します'); return; }
   companyDoc().collection('accounts').add({name, category}).then(()=>{
     document.getElementById('newAccountName').value = '';
-  });
+  }).catch(reportError);
 }
 function updateAccount(id, field, value){
   if(field==='name'){
     const trimmed = value.trim();
     if(!trimmed){ alert('科目名を空にはできません'); renderAccountsTable(); return; }
     if(accounts.some(a=>a.id!==id && a.name===trimmed)){ alert('同じ名前の科目が既に存在します'); renderAccountsTable(); return; }
-    companyDoc().collection('accounts').doc(id).update({name: trimmed});
+    companyDoc().collection('accounts').doc(id).update({name: trimmed}).catch(reportError);
     return;
   }
-  companyDoc().collection('accounts').doc(id).update({[field]: value});
+  companyDoc().collection('accounts').doc(id).update({[field]: value}).catch(reportError);
 }
 function deleteAccount(id){
   if(usedAccountIds().has(id)){ alert('この科目は仕訳で使用されているため削除できません。'); return; }
   if(!confirm('この科目を削除しますか?')) return;
-  companyDoc().collection('accounts').doc(id).delete();
+  companyDoc().collection('accounts').doc(id).delete().catch(reportError);
 }
 function bulkAddAccounts(){
   const text = document.getElementById('bulkAccountArea').value;
@@ -1204,7 +1223,7 @@ function bulkAddAccounts(){
   commitInChunks(ops).then(()=>{
     document.getElementById('bulkAccountMsg').textContent = `${toAdd.length}件追加しました${skipped?`(重複 ${skipped}件はスキップ)`:''}`;
     document.getElementById('bulkAccountArea').value = '';
-  });
+  }).catch(reportError);
 }
 
 /* ---------------- 仕訳入力(複数行対応) ---------------- */
@@ -1281,6 +1300,7 @@ function recalcTotals(){
 
 function resetEntryForm(){
   editingEntryId = null;
+  editingIsDraft = false;
   fiscalYearManuallyEdited = false;
   document.getElementById('entryDate').valueAsDate = new Date();
   document.getElementById('entryFiscalYear').value = new Date().getFullYear();
@@ -1290,54 +1310,112 @@ function resetEntryForm(){
   renderDebitLines(); renderCreditLines();
   document.getElementById('entryFormTitle').textContent = '仕訳を入力';
   document.getElementById('saveEntryBtn').textContent = 'この仕訳を登録';
+  document.getElementById('draftEntryBtn').classList.remove('hidden');
   document.getElementById('cancelEditBtn').classList.add('hidden');
   document.getElementById('editBanner').classList.add('hidden');
 }
 
-function loadEntryIntoForm(entry, isCopy){
+function loadEntryIntoForm(entry, isCopy, isDraft){
   editingEntryId = isCopy ? null : entry.id;
+  editingIsDraft = !isCopy && !!isDraft;
   fiscalYearManuallyEdited = true;
-  document.getElementById('entryDate').value = isCopy ? new Date().toISOString().slice(0,10) : entry.date;
-  document.getElementById('entryFiscalYear').value = entry.fiscalYear || entry.date.slice(0,4);
+  document.getElementById('entryDate').value = isCopy ? new Date().toISOString().slice(0,10) : (entry.date||'');
+  document.getElementById('entryFiscalYear').value = entry.fiscalYear || (entry.date||'').slice(0,4);
   document.getElementById('entryDesc').value = entry.description || '';
-  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
-  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId, amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
+  debitFormLines = entry.debitLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId||'', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
+  creditFormLines = entry.creditLines.map(l=>({tempId:++lineIdCounter, accountId:l.accountId||'', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', taxType:l.taxType||''}));
+  if(debitFormLines.length===0) debitFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
+  if(creditFormLines.length===0) creditFormLines = [{tempId:++lineIdCounter, accountId:'', amount:'', tag:'', subTag:'', taxType:''}];
   renderDebitLines(); renderCreditLines();
-  document.getElementById('entryFormTitle').textContent = isCopy ? '仕訳を複製して登録' : '仕訳を編集';
-  document.getElementById('saveEntryBtn').textContent = isCopy ? 'この仕訳を新規登録' : '更新する';
+  document.getElementById('entryFormTitle').textContent = isCopy ? '仕訳を複製して登録' : (editingIsDraft ? '仮保存中の仕訳を編集' : '仕訳を編集');
+  document.getElementById('saveEntryBtn').textContent = isCopy ? 'この仕訳を新規登録' : (editingIsDraft ? '内容を確定して登録する' : '更新する');
+  document.getElementById('draftEntryBtn').classList.remove('hidden');
   document.getElementById('cancelEditBtn').classList.remove('hidden');
   const banner = document.getElementById('editBanner');
-  banner.textContent = isCopy ? '既存の仕訳をもとに新しい仕訳を作成します。' : '既存の仕訳を編集しています。';
+  banner.textContent = isCopy ? '既存の仕訳をもとに新しい仕訳を作成します。' : (editingIsDraft ? 'これは仮保存中の仕訳です。内容を直して「内容を確定して登録する」を押すと本登録されます。' : '既存の仕訳を編集しています。');
   banner.classList.remove('hidden');
   switchTab('tab-entry');
   window.scrollTo({top:0, behavior:'smooth'});
 }
 
-function editEntry(id){ const e = entries.find(x=>x.id===id); if(e) loadEntryIntoForm(e, false); }
-function copyEntry(id){ const e = entries.find(x=>x.id===id); if(e) loadEntryIntoForm(e, true); }
+function findEntryById(id){ return entries.find(x=>x.id===id) || draftEntries.find(x=>x.id===id); }
+function editEntry(id){ const e = findEntryById(id); if(e) loadEntryIntoForm(e, false, !!e.isDraft); }
+function copyEntry(id){ const e = findEntryById(id); if(e) loadEntryIntoForm(e, true, false); }
+
+function collectFormLines(arr, {keepIncomplete}={}){
+  const mapped = arr.map(l=>({
+    accountId: l.accountId||'',
+    amount: parseFloat(l.amount)||0,
+    tag: (l.tag||'').trim(),
+    subTag: (l.subTag||'').trim(),
+    taxType: l.taxType||''
+  }));
+  return keepIncomplete ? mapped : mapped.filter(l=>l.accountId && l.amount>0);
+}
 
 function saveEntry(){
   const date = document.getElementById('entryDate').value;
   const fiscalYear = String(document.getElementById('entryFiscalYear').value || date.slice(0,4));
   const description = document.getElementById('entryDesc').value.trim();
-  const dLines = debitFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), subTag:(l.subTag||'').trim(), taxType:l.taxType||''}));
-  const cLines = creditFormLines.filter(l=>l.accountId && parseFloat(l.amount)>0).map(l=>({accountId:l.accountId, amount:parseFloat(l.amount), tag:(l.tag||'').trim(), subTag:(l.subTag||'').trim(), taxType:l.taxType||''}));
+  const dLines = collectFormLines(debitFormLines);
+  const cLines = collectFormLines(creditFormLines);
 
   if(!date){ alert('日付を入力してください'); return; }
-  if(dLines.length===0 || cLines.length===0){ alert('借方・貸方それぞれ1行以上、科目と金額(0より大きい数)を入力してください'); return; }
+  if(dLines.length===0 || cLines.length===0){ alert('借方・貸方それぞれ1行以上、科目と金額(0より大きい数)を入力してください。内容が固まっていない場合は「仮保存」もお使いください。'); return; }
   const dTotal = dLines.reduce((s,l)=>s+l.amount,0);
   const cTotal = cLines.reduce((s,l)=>s+l.amount,0);
   if(dTotal!==cTotal){ alert(`貸借が一致していません(借方 ${fmtYen(dTotal)} / 貸方 ${fmtYen(cTotal)})`); return; }
 
-  const payload = { date, fiscalYear, description, debitLines: dLines, creditLines: cLines };
+  const payload = { date, fiscalYear, description, debitLines: dLines, creditLines: cLines, isDraft:false };
   const promise = editingEntryId
     ? companyDoc().collection('entries').doc(editingEntryId).set(payload)
     : companyDoc().collection('entries').add(payload);
 
-  promise.then(()=>{ resetEntryForm(); });
+  promise.then(()=>{ resetEntryForm(); }).catch(reportError);
 }
+
+// 内容が未確定(科目未選択・金額0・貸借不一致など)でも、そのまま一時保存しておく
+function saveEntryAsDraft(){
+  const date = document.getElementById('entryDate').value;
+  if(!date){ alert('日付だけは入力してください(あとで内容を直せます)'); return; }
+  const fiscalYear = String(document.getElementById('entryFiscalYear').value || date.slice(0,4));
+  const description = document.getElementById('entryDesc').value.trim();
+  const dLines = collectFormLines(debitFormLines, {keepIncomplete:true});
+  const cLines = collectFormLines(creditFormLines, {keepIncomplete:true});
+  const hasAnyContent = description || dLines.some(l=>l.accountId||l.amount) || cLines.some(l=>l.accountId||l.amount);
+  if(!hasAnyContent){ alert('何も入力されていません'); return; }
+
+  const payload = { date, fiscalYear, description, debitLines: dLines, creditLines: cLines, isDraft:true };
+  const promise = editingEntryId
+    ? companyDoc().collection('entries').doc(editingEntryId).set(payload)
+    : companyDoc().collection('entries').add(payload);
+
+  promise.then(()=>{ resetEntryForm(); alert('仮保存しました。「仕訳帳」タブの「仮保存中の仕訳」から続きを入力できます。'); }).catch(reportError);
+}
+
 function deleteEntry(id){
-  if(confirm('この仕訳を削除しますか?')) companyDoc().collection('entries').doc(id).delete();
+  if(confirm('この仕訳を削除しますか?')) companyDoc().collection('entries').doc(id).delete().catch(reportError);
+}
+
+function renderDraftEntries(){
+  const area = document.getElementById('draftEntriesArea');
+  if(!area) return;
+  if(draftEntries.length===0){ area.innerHTML=''; return; }
+  let html = `<div class="dup-warning" style="border-color:var(--warn);background:#fff8e6;"><div class="dw-title" style="color:#8a6d00;">📝 仮保存中の仕訳が ${draftEntries.length}件あります(まだ試算表・元帳などには反映されていません)</div>`;
+  [...draftEntries].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(e=>{
+    const dTotal = e.debitLines.reduce((s,l)=>s+(l.amount||0),0);
+    const cTotal = e.creditLines.reduce((s,l)=>s+(l.amount||0),0);
+    const balanced = dTotal===cTotal && dTotal>0;
+    html += `<div class="dup-group">
+      <span>${e.date||'(日付なし)'} ${escapeHtml(e.description||'(摘要なし)')} ${balanced?'':`<span style="color:var(--danger);">(借方 ${fmtYen(dTotal)} / 貸方 ${fmtYen(cTotal)})</span>`}</span>
+      <span>
+        <button class="btn-primary btn-sm" onclick="editEntry('${e.id}')">続きを入力する</button>
+        <button class="btn-danger btn-sm" onclick="deleteEntry('${e.id}')">削除</button>
+      </span>
+    </div>`;
+  });
+  html += '</div>';
+  area.innerHTML = html;
 }
 
 /* ---------------- Excel貼り付け取り込み(単純な1対1仕訳のみ) ---------------- */
@@ -1371,7 +1449,7 @@ function extractDateAndRest(cols){
 
 function accountNameOptionsHtml(selectedName){
   let html = `<option value="">(未選択)</option>`;
-  categoryOrder.forEach(cat=>{
+  CATEGORY_ORDER.forEach(cat=>{
     const list = accounts.filter(a=>a.category===cat);
     if(list.length===0) return;
     html += `<optgroup label="${categoryLabels[cat]}">`;
@@ -1472,7 +1550,7 @@ function confirmPasteImport(){
     document.getElementById('pasteArea').value = '';
     pasteRows = [];
     document.getElementById('pastePreviewArea').innerHTML = '';
-  });
+  }).catch(reportError);
 }
 
 /* ---------------- 銀行取込 ---------------- */
@@ -1585,7 +1663,7 @@ function registerBankRows(){
     document.getElementById('bankPasteArea').value = '';
     pendingBankRows = [];
     document.getElementById('bankPreviewArea').innerHTML = '';
-  });
+  }).catch(reportError);
 }
 
 /* ---------------- Excel出力 ---------------- */
@@ -1762,7 +1840,7 @@ function autoBalanceOpeningToRetained(){
     // 科目がまだ無い会社では、その場で作成してから差額を入れる
     companyDoc().collection('accounts').add({name:'繰越利益剰余金', category:'equity'}).then(ref=>{
       openingBalanceDraft[ref.id] = diff;
-    });
+    }).catch(reportError);
   }
 }
 function saveOpeningBalances(){
@@ -1778,7 +1856,7 @@ function saveOpeningBalances(){
     openingBalanceSettings = {fiscalYear, balances:cleaned};
     alert('期首残高を保存しました');
     renderTrialBalance(); renderBalanceSheet(); onLedgerAccountChange();
-  });
+  }).catch(reportError);
 }
 
 /* ---------------- 会計期間(期数) ---------------- */
@@ -1808,7 +1886,7 @@ function addFiscalPeriod(){
     document.getElementById('newPeriodStart').value='';
     document.getElementById('newPeriodEnd').value='';
     populateYearSelects();
-  });
+  }).catch(reportError);
 }
 function deleteFiscalPeriod(number){
   if(!confirm(`第${number}期の登録を削除しますか?(過去の仕訳データは変わりません)`)) return;
@@ -1817,7 +1895,7 @@ function deleteFiscalPeriod(number){
     fiscalPeriods = updated;
     renderFiscalPeriodsTable();
     populateYearSelects();
-  });
+  }).catch(reportError);
 }
 
 
@@ -1964,13 +2042,15 @@ async function applyTagCleanup(){
   });
   if(updates.length===0){ alert('対象の仕訳がありません'); return; }
   if(!confirm(`${updates.length}件の仕訳のタグを更新します。よろしいですか?`)) return;
-  for(let i=0;i<updates.length;i+=400){
-    const batch = db.batch();
-    updates.slice(i,i+400).forEach(u=>batch.update(companyDoc().collection('entries').doc(u.id), { debitLines:u.debitLines, creditLines:u.creditLines }));
-    await batch.commit();
-  }
-  tagCleanupRows = [];
-  document.getElementById('tagCleanupArea').innerHTML = `<p class="hint" style="color:var(--accent);">${updates.length}件更新しました。</p>`;
+  try{
+    for(let i=0;i<updates.length;i+=400){
+      const batch = db.batch();
+      updates.slice(i,i+400).forEach(u=>batch.update(companyDoc().collection('entries').doc(u.id), { debitLines:u.debitLines, creditLines:u.creditLines }));
+      await batch.commit();
+    }
+    tagCleanupRows = [];
+    document.getElementById('tagCleanupArea').innerHTML = `<p class="hint" style="color:var(--accent);">${updates.length}件更新しました。</p>`;
+  } catch(e){ reportError(e); }
 }
 
 /* ---------------- 総勘定元帳 ---------------- */
@@ -2473,7 +2553,7 @@ function applyTaxBulk(){
     alert(`${targets.length}行を更新しました`);
     taxBulkMatches = [];
     document.getElementById('taxBulkResultsArea').innerHTML = '<p class="empty-msg">更新しました。必要ならもう一度検索してください。</p>';
-  });
+  }).catch(reportError);
 }
 
 /* ---------------- 従業員・給与明細 ---------------- */
@@ -2481,11 +2561,11 @@ function addEmployee(){
   const name = document.getElementById('newEmployeeName').value.trim();
   const role = document.getElementById('newEmployeeRole').value;
   if(!name){ alert('氏名を入力してください'); return; }
-  companyDoc().collection('employees').add({name, role}).then(()=>{ document.getElementById('newEmployeeName').value=''; });
+  companyDoc().collection('employees').add({name, role}).then(()=>{ document.getElementById('newEmployeeName').value=''; }).catch(reportError);
 }
 function deleteEmployee(id){
   if(payslips.some(p=>p.employeeId===id)){ alert('この従業員の給与明細が保存されているため削除できません。'); return; }
-  if(confirm('この従業員を削除しますか?')) companyDoc().collection('employees').doc(id).delete();
+  if(confirm('この従業員を削除しますか?')) companyDoc().collection('employees').doc(id).delete().catch(reportError);
 }
 function renderEmployeeTable(){
   let html = '<tr><th class="left">氏名</th><th class="left">区分</th><th></th></tr>';
@@ -2553,7 +2633,7 @@ function addFixedAsset(){
     document.getElementById('newAssetCost').value = '';
     document.getElementById('newAssetLife').value = '';
     document.getElementById('newAssetSalvage').value = '0';
-  });
+  }).catch(reportError);
 }
 function accumulatedDepreciation(asset){
   let sum = 0;
@@ -2565,17 +2645,17 @@ function accumulatedDepreciation(asset){
 function disposeFixedAsset(id){
   const date = prompt('除却・売却した日付を入力してください(YYYY-MM-DD)', todayForCorp());
   if(!date) return;
-  companyDoc().collection('fixedAssets').doc(id).update({disposalDate:date});
+  companyDoc().collection('fixedAssets').doc(id).update({disposalDate:date}).catch(reportError);
 }
 function reactivateFixedAsset(id){
-  if(confirm('除却・売却の登録を取り消しますか?')) companyDoc().collection('fixedAssets').doc(id).update({disposalDate:''});
+  if(confirm('除却・売却の登録を取り消しますか?')) companyDoc().collection('fixedAssets').doc(id).update({disposalDate:''}).catch(reportError);
 }
 function deleteFixedAsset(id){
   const asset = fixedAssets.find(a=>a.id===id);
   if(asset && accumulatedDepreciation(asset)>0){
     if(!confirm('この資産にはすでに減価償却の仕訳があります。台帳からの削除は仕訳自体には影響しません。削除しますか?')) return;
   } else if(!confirm('この資産を削除しますか?')) return;
-  companyDoc().collection('fixedAssets').doc(id).delete();
+  companyDoc().collection('fixedAssets').doc(id).delete().catch(reportError);
 }
 function todayForCorp(){ return new Date().toISOString().slice(0,10); }
 function renderFixedAssetsTable(){
@@ -2663,7 +2743,7 @@ function createDepreciationEntry(assetId, fy){
     date: end, fiscalYear: fy, description: `${asset.name} 減価償却費`,
     debitLines: [{accountId: asset.expenseAccountId, amount, tag: asset.name}],
     creditLines: [{accountId: asset.accountId, amount, tag: asset.name}]
-  });
+  }).catch(reportError);
 }
 function createAllDepreciationEntries(){
   const yearSel = document.getElementById('depreciationYearSelect');
@@ -2680,7 +2760,7 @@ function createAllDepreciationEntries(){
       creditLines: [{accountId: a.accountId, amount: calc.amount, tag: a.name}]
     }
   }));
-  commitInChunks(ops).then(()=>{ alert(`${targets.length}件の仕訳を作成しました`); });
+  commitInChunks(ops).then(()=>{ alert(`${targets.length}件の仕訳を作成しました`); }).catch(reportError);
 }
 
 let payFormLines = [];
@@ -2778,7 +2858,7 @@ function savePayslip(){
   const payload = collectPayslipPayload();
   if(!payload) return;
   const promise = editingPayslipId ? companyDoc().collection('payslips').doc(editingPayslipId).set(payload, {merge:true}) : companyDoc().collection('payslips').add(payload);
-  promise.then(()=>{ alert('保存しました'); resetPayslipForm(); });
+  promise.then(()=>{ alert('保存しました'); resetPayslipForm(); }).catch(reportError);
 }
 function savePayslipAndCreateEntry(){
   const payload = collectPayslipPayload();
@@ -2789,7 +2869,7 @@ function savePayslipAndCreateEntry(){
     const full = { ...payload, journalEntryId: entryRef.id };
     const promise = editingPayslipId ? companyDoc().collection('payslips').doc(editingPayslipId).set(full, {merge:true}) : companyDoc().collection('payslips').add(full);
     return promise;
-  }).then(()=>{ alert('明細を保存し、仕訳も作成しました'); resetPayslipForm(); });
+  }).then(()=>{ alert('明細を保存し、仕訳も作成しました'); resetPayslipForm(); }).catch(reportError);
 }
 function loadPayslipToJournal(){
   const payload = collectPayslipPayload();
@@ -2833,7 +2913,7 @@ function deletePayslip(id){
   const p = payslips.find(x=>x.id===id);
   const hasEntry = p && p.journalEntryId && entries.some(e=>e.id===p.journalEntryId);
   const msg = hasEntry ? 'この給与明細を削除しますか?(紐づいている仕訳は削除されません。別途、仕訳帳から削除してください)' : 'この給与明細を削除しますか?';
-  if(confirm(msg)) companyDoc().collection('payslips').doc(id).delete();
+  if(confirm(msg)) companyDoc().collection('payslips').doc(id).delete().catch(reportError);
 }
 
 function renderPayslipLedger(){
