@@ -269,14 +269,8 @@
           <h3 style="margin:0;flex:1;">仕訳帳</h3>
           <label>会計年度:</label>
           <select id="journalYearSelect" onchange="renderJournal()"></select>
-          <label>並び替え:</label>
-          <select id="journalSortSelect" onchange="renderJournal()">
-            <option value="date_asc">日付(古い順)</option>
-            <option value="date_desc">日付(新しい順)</option>
-            <option value="debit_account">借方科目</option>
-            <option value="credit_account">貸方科目</option>
-          </select>
         </div>
+        <p class="hint">表の見出し(日付・摘要・借方・貸方・金額)をクリックすると並び替えできます。もう一度押すと昇順/降順が切り替わります。</p>
         <div id="draftEntriesArea"></div>
         <div id="journalDupArea"></div>
         <div class="table-wrap"><table id="journalTable"></table></div>
@@ -678,6 +672,8 @@ function yearLabel(y){
   return p ? `第${p.number}期(${p.start}〜${p.end})` : `${y}年度`;
 }
 let pendingImportRows = [];
+let journalSortKey = 'date';
+let journalSortDir = 'asc';
 let editingEntryId = null;
 let editingIsDraft = false;
 let fiscalYearManuallyEdited = false;
@@ -1735,19 +1731,33 @@ function findDuplicateGroups(){
   return Object.values(map).filter(g=>g.length>1);
 }
 
+function sortJournalBy(key){
+  if(journalSortKey===key){ journalSortDir = journalSortDir==='asc' ? 'desc' : 'asc'; }
+  else { journalSortKey = key; journalSortDir = 'asc'; }
+  renderJournal();
+}
+function journalSortHeader(key, label){
+  const active = journalSortKey===key;
+  const arrow = active ? (journalSortDir==='asc' ? ' ▲' : ' ▼') : '';
+  return `<th class="left" style="cursor:pointer;user-select:none;${active?'color:var(--navy);':''}" onclick="sortJournalBy('${key}')">${label}${arrow}</th>`;
+}
 function renderJournal(){
   const yearSel = document.getElementById('journalYearSelect');
-  const sortSel = document.getElementById('journalSortSelect');
   if(!yearSel) return;
   const year = yearSel.value || 'all';
-  const sortBy = sortSel ? sortSel.value : 'date_asc';
   const firstDebitName = (e)=> e.debitLines[0] ? accountName(e.debitLines[0].accountId) : '';
   const firstCreditName = (e)=> e.creditLines[0] ? accountName(e.creditLines[0].accountId) : '';
+  const debitTotal = (e)=> e.debitLines.reduce((s,l)=>s+l.amount,0);
+  const dir = journalSortDir==='desc' ? -1 : 1;
   const rows = entries.filter(e=> year==='all' || e.fiscalYear===year).sort((a,b)=>{
-    if(sortBy==='date_desc') return b.date.localeCompare(a.date) || 0;
-    if(sortBy==='debit_account') return firstDebitName(a).localeCompare(firstDebitName(b),'ja') || a.date.localeCompare(b.date);
-    if(sortBy==='credit_account') return firstCreditName(a).localeCompare(firstCreditName(b),'ja') || a.date.localeCompare(b.date);
-    return a.date.localeCompare(b.date);
+    let cmp;
+    if(journalSortKey==='desc_text') cmp = (a.description||'').localeCompare(b.description||'','ja');
+    else if(journalSortKey==='debit') cmp = firstDebitName(a).localeCompare(firstDebitName(b),'ja');
+    else if(journalSortKey==='credit') cmp = firstCreditName(a).localeCompare(firstCreditName(b),'ja');
+    else if(journalSortKey==='amount') cmp = debitTotal(a) - debitTotal(b);
+    else cmp = a.date.localeCompare(b.date);
+    if(cmp===0) cmp = a.date.localeCompare(b.date);
+    return cmp * dir;
   });
 
   const dupGroups = findDuplicateGroups();
@@ -1762,9 +1772,9 @@ function renderJournal(){
   }
   document.getElementById('journalDupArea') && (document.getElementById('journalDupArea').innerHTML = dupHtml);
 
-  let html = '<tr><th class="left">日付</th><th class="left">摘要</th><th class="left">借方</th><th class="left">貸方</th><th></th></tr>';
+  let html = '<tr>' + journalSortHeader('date','日付') + journalSortHeader('desc_text','摘要') + journalSortHeader('debit','借方') + journalSortHeader('credit','貸方') + '<th>' + (journalSortKey==='amount'?'金額'+(journalSortDir==='asc'?' ▲':' ▼'):'<span style="cursor:pointer;" onclick="sortJournalBy(\'amount\')">金額</span>') + '</th><th></th></tr>';
   if(rows.length===0){
-    html += '<tr><td colspan="5" class="empty-msg">該当する仕訳がありません</td></tr>';
+    html += '<tr><td colspan="6" class="empty-msg">該当する仕訳がありません</td></tr>';
   }
   rows.forEach(e=>{
     const debitStr = e.debitLines.map(l=>`${escapeHtml(accountName(l.accountId))} ${fmtYen(l.amount)}`).join('<br>');
@@ -1774,6 +1784,7 @@ function renderJournal(){
       <td class="left">${escapeHtml(e.description||'')}</td>
       <td class="left">${debitStr}</td>
       <td class="left">${creditStr}</td>
+      <td>${fmtYen(debitTotal(e))}</td>
       <td style="white-space:nowrap;">
         <button class="btn-outline btn-sm" onclick="editEntry('${e.id}')">編集</button>
         <button class="btn-outline btn-sm" onclick="copyEntry('${e.id}')">複製</button>
@@ -1902,35 +1913,37 @@ function deleteFiscalPeriod(number){
 // 対応づけのルール:
 //  1) 「詳細(何月分など)」が同じもの同士を先に対応づける(毎月払い・年金など)
 //  2) 残りは日付の古い順(先入れ先出し)で対応づける(年末に一括払いする所得税など)
+// 「詳細(補助の内訳)」が完全に一致するものだけを対応づける。詳細が違う・片方だけ無い場合は絶対に相殺しない。
+// 詳細が両方とも未入力("")の場合は、詳細を使い分けていないケースとして同じグループ内で先入れ先出しにする。
 function fifoMatchPairs(occ, normalSide){
   const byDate = (a,b)=>a.date.localeCompare(b.date);
-  const inc = occ.filter(o=>o.side===normalSide).map(o=>({...o, remaining:o.amount})).sort(byDate);
-  const out = occ.filter(o=>o.side!==normalSide).map(o=>({...o, remaining:o.amount})).sort(byDate);
-  const pairs = [];
-  const consume = (a,b)=>{
-    const amt = Math.min(a.remaining, b.remaining);
-    if(amt<=0.0001) return;
-    pairs.push({ inDate:a.date, inDesc:a.desc, inSub:a.subTag, outDate:b.date, outDesc:b.desc, outSub:b.subTag, amount:amt });
-    a.remaining -= amt; b.remaining -= amt;
-  };
-  // 1) 詳細が一致するもの同士
-  out.forEach(b=>{
-    if(!b.subTag) return;
-    inc.forEach(a=>{ if(b.remaining>0.0001 && a.remaining>0.0001 && a.subTag===b.subTag) consume(a,b); });
+  const inc = occ.filter(o=>o.side===normalSide).map(o=>({...o, remaining:o.amount}));
+  const out = occ.filter(o=>o.side!==normalSide).map(o=>({...o, remaining:o.amount}));
+  const groups = new Map();
+  const keyOf = o => o.subTag || '';
+  [...inc, ...out].forEach(o=>{ const k=keyOf(o); if(!groups.has(k)) groups.set(k, {inc:[], out:[]}); });
+  inc.forEach(o=>groups.get(keyOf(o)).inc.push(o));
+  out.forEach(o=>groups.get(keyOf(o)).out.push(o));
+
+  const pairs = [], openIn = [], openOut = [];
+  groups.forEach(g=>{
+    const incG = [...g.inc].sort(byDate);
+    const outG = [...g.out].sort(byDate);
+    let ii=0, oi=0;
+    while(ii<incG.length && oi<outG.length){
+      const a = incG[ii], b = outG[oi];
+      const amt = Math.min(a.remaining, b.remaining);
+      if(amt>0.0001){
+        pairs.push({ inDate:a.date, inDesc:a.desc, inSub:a.subTag, outDate:b.date, outDesc:b.desc, outSub:b.subTag, amount:amt });
+        a.remaining -= amt; b.remaining -= amt;
+      }
+      if(a.remaining<=0.0001) ii++;
+      if(b.remaining<=0.0001) oi++;
+    }
+    incG.forEach(a=>{ if(a.remaining>0.0001) openIn.push(a); });
+    outG.forEach(b=>{ if(b.remaining>0.0001) openOut.push(b); });
   });
-  // 2) 残りは先入れ先出し
-  const incLeft = inc.filter(a=>a.remaining>0.0001);
-  const outLeft = out.filter(b=>b.remaining>0.0001);
-  let ii=0, oi=0;
-  while(ii<incLeft.length && oi<outLeft.length){
-    const a = incLeft[ii], b = outLeft[oi];
-    consume(a,b);
-    if(a.remaining<=0.0001) ii++;
-    if(b.remaining<=0.0001) oi++;
-  }
   pairs.sort((x,y)=> x.outDate.localeCompare(y.outDate) || x.inDate.localeCompare(y.inDate));
-  const openIn = inc.filter(a=>a.remaining>0.0001);
-  const openOut = out.filter(b=>b.remaining>0.0001);
   return { pairs, openIn, openOut };
 }
 
@@ -1942,7 +1955,7 @@ function renderMatchingSection(occForTag, isDebitNormal, tagLabel){
   if(pairs.length===0 && openIn.length===0 && openOut.length===0){ area.innerHTML=''; return; }
   const inLabel = isDebitNormal ? '発生(借方)' : '受入(貸方)';
   const outLabel = isDebitNormal ? '使用(貸方)' : '使用(借方)';
-  let html = `<div class="matching-box"><div class="mb-title">「${escapeHtml(tagLabel)}」の入出金の対応(同じ詳細を優先し、残りは先入れ先出し)</div>`;
+  let html = `<div class="matching-box"><div class="mb-title">「${escapeHtml(tagLabel)}」の入出金の対応(詳細が完全に一致するものだけを先入れ先出しで対応づけています。詳細が違う・片方だけ未入力のものは相殺しません)</div>`;
   pairs.forEach(p=>{
     html += `<div class="match-pair">
       <span class="mp-side">${inLabel} ${p.inDate}${subTagBadge(p.inSub)}${p.inDesc?' '+escapeHtml(p.inDesc):''}</span>
@@ -2058,8 +2071,8 @@ function accountOccurrences(accId){
   // 選択科目に関わる全仕訳の行(借方/貸方どちらでも)を平坦化。年度フィルタなし(未決済一覧・タグ抽出用)
   const occ = [];
   entries.forEach(e=>{
-    e.debitLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'debit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.creditLines.map(c=>accountName(c.accountId)).join(' / ')}); });
-    e.creditLines.forEach(l=>{ if(l.accountId===accId) occ.push({date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'credit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.debitLines.map(c=>accountName(c.accountId)).join(' / ')}); });
+    e.debitLines.forEach(l=>{ if(l.accountId===accId) occ.push({entryId:e.id, date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'debit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.creditLines.map(c=>accountName(c.accountId)).join(' / ')}); });
+    e.creditLines.forEach(l=>{ if(l.accountId===accId) occ.push({entryId:e.id, date:e.date, fiscalYear:e.fiscalYear, desc:e.description, side:'credit', amount:l.amount, tag:l.tag||'', subTag:l.subTag||'', counter:e.debitLines.map(c=>accountName(c.accountId)).join(' / ')}); });
   });
   occ.sort((a,b)=>a.date.localeCompare(b.date));
   return occ;
@@ -2127,7 +2140,7 @@ function renderLedger(){
   }
 
   const occ = allOcc.filter(o => (year==='all' || o.fiscalYear===year) && (!tagFilter || o.tag===tagFilter));
-  let html = '<tr><th class="left">日付</th><th class="left">摘要</th><th class="left">補助</th><th class="left">詳細</th><th class="left">相手科目</th><th>借方</th><th>貸方</th><th>残高</th></tr>';
+  let html = '<tr><th class="left">日付</th><th class="left">摘要</th><th class="left">補助</th><th class="left">詳細</th><th class="left">相手科目</th><th>借方</th><th>貸方</th><th>残高</th><th></th></tr>';
 
   let balance = 0;
   // 資産・負債・資本科目かつ特定年度を選んでいる場合は、前年度以前の累積残高(+期首残高)を開始行として表示
@@ -2139,11 +2152,11 @@ function renderLedger(){
     let openingNote = '前年度以前の累積';
     if(!tagFilter && openYear && year>=openYear){ openingBalance += openingBalanceFor(accId); openingNote = '期首残高を含む'; }
     balance = openingBalance;
-    html += `<tr class="opening-row"><td class="left" colspan="7">${year}年度 開始時点の残高(${openingNote})</td><td>${fmtYen(openingBalance)}</td></tr>`;
+    html += `<tr class="opening-row"><td class="left" colspan="7">${year}年度 開始時点の残高(${openingNote})</td><td>${fmtYen(openingBalance)}</td><td></td></tr>`;
   }
 
   if(occ.length===0){
-    html += '<tr><td colspan="8" class="empty-msg">該当する記帳がありません</td></tr>';
+    html += '<tr><td colspan="9" class="empty-msg">該当する記帳がありません</td></tr>';
   }
   occ.forEach(o=>{
     balance += isDebitNormal ? (o.side==='debit'?o.amount:-o.amount) : (o.side==='credit'?o.amount:-o.amount);
@@ -2156,6 +2169,7 @@ function renderLedger(){
       <td>${o.side==='debit'?fmtYen(o.amount):''}</td>
       <td>${o.side==='credit'?fmtYen(o.amount):''}</td>
       <td>${fmtYen(balance)}</td>
+      <td><button class="btn-outline btn-sm" onclick="editEntry('${o.entryId}')">編集</button></td>
     </tr>`;
   });
   document.getElementById('ledgerTable').innerHTML = html;
