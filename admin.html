@@ -247,7 +247,8 @@
         <h3>銀行の入出金履歴を取り込む</h3>
         <p class="hint">
           ネットバンキングからダウンロードしたCSV(または画面からコピーした表)を貼り付けてください。列の形式は次のいずれかに対応します。<br>
-          ① 日付,摘要,出金額,入金額(4列) 　② 日付,摘要,金額(3列・入金は+、出金は-)
+          ① 日付,摘要,出金額,入金額(4列) 　② 日付,摘要,金額(3列・入金は+、出金は-)<br>
+          出金額が、保存済みの給与明細の差引支給額とちょうど一致する行は、自動でその給与明細にリンクされます(社員ごとの給与の支払いをまとめて取り込むときに便利です)。
         </p>
         <div class="form-row">
           <label>この履歴が属する預金口座
@@ -1575,30 +1576,55 @@ function parseBankLine(line){
   return { dateRaw, desc, outRaw: '', inRaw: String(amt||'') };
 }
 
+function unlinkedPayslips(){
+  return payslips.filter(p=>!p.journalEntryId || !entries.some(e=>e.id===p.journalEntryId));
+}
 function previewBank(){
   const raw = document.getElementById('bankPasteArea').value;
-  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0)
+  // 行末の空セル(タブ区切りの最後の列が空など)は意味のある情報なので、行全体のtrim()では消さない
+  const lines = raw.split(/\r?\n/).map(l=>l.replace(/\r$/,'')).filter(l=>l.trim().length>0)
     .filter(l=>{ const first=l.split(/\t|,/)[0].trim(); return first!=='日付' && first.toLowerCase()!=='date'; });
   pendingBankRows = [];
+  const usedPayslipIds = new Set();
+  const candidates = unlinkedPayslips();
   lines.forEach(line=>{
     const { dateRaw, desc, outRaw, inRaw } = parseBankLine(line);
     const date = parseDateFlexible(dateRaw);
     const amountOut = Number(String(outRaw||'0').replace(/,/g,'')) || 0;
     const amountIn = Number(String(inRaw||'0').replace(/,/g,'')) || 0;
     if(!date || (amountOut<=0 && amountIn<=0)) return;
-    pendingBankRows.push({ rowId: ++bankRowIdCounter, date, desc: desc||'', amountOut, amountIn, counterAccountId:'', selected:false });
+    let payslipId = '';
+    if(amountOut>0){
+      // 出金額とちょうど一致する、まだ仕訳が無い給与明細を自動で1件だけ探す(あいまいな場合はリンクしない)
+      const matches = candidates.filter(p=>!usedPayslipIds.has(p.id) && p.netPay===amountOut);
+      if(matches.length===1){ payslipId = matches[0].id; usedPayslipIds.add(payslipId); }
+    }
+    pendingBankRows.push({ rowId: ++bankRowIdCounter, date, desc: desc||'', amountOut, amountIn, counterAccountId:'', payslipId, selected:false });
   });
   renderBankPreview();
 }
 
+function payslipOptionsHtml(selectedId){
+  const list = unlinkedPayslips().filter(p=>!selectedId || p.id===selectedId || true);
+  let html = '<option value="">(リンクしない・相手科目を選ぶ)</option>';
+  // 現在選択中のものが既にリンク解消済み等で候補に無い場合も表示できるようにする
+  const all = selectedId && !list.some(p=>p.id===selectedId) ? [...list, ...payslips.filter(p=>p.id===selectedId)] : list;
+  all.forEach(p=>{ html += `<option value="${p.id}" ${p.id===selectedId?'selected':''}>${escapeHtml(p.employeeName)} ${p.yearMonth}(差引 ${fmtYen(p.netPay)})</option>`; });
+  return html;
+}
 function bankRowHtml(r){
   const isIn = r.amountIn>0;
+  const payslip = r.payslipId ? payslips.find(p=>p.id===r.payslipId) : null;
   return `<tr>
     <td><input type="checkbox" ${r.selected?'checked':''} onchange="toggleBankRowSelected(${r.rowId},this.checked)"></td>
     <td class="left">${r.date}</td>
     <td class="left">${escapeHtml(r.desc)}</td>
     <td class="${isIn?'bank-in':'bank-out'}">${isIn?'入金 '+fmtYen(r.amountIn):'出金 '+fmtYen(r.amountOut)}</td>
-    <td class="left"><select onchange="updateBankRowField(${r.rowId},'counterAccountId',this.value)">${accountOptionsHtml(r.counterAccountId)}</select></td>
+    <td class="left">
+      ${isIn ? '' : `<select onchange="updateBankRowField(${r.rowId},'payslipId',this.value)" style="margin-bottom:4px;">${payslipOptionsHtml(r.payslipId)}</select>`}
+      ${payslip ? `<div style="font-size:11px;color:var(--accent);">👤 ${escapeHtml(payslip.employeeName)} ${payslip.yearMonth} の給与にリンクします</div>` : ''}
+      ${r.payslipId ? '' : `<select onchange="updateBankRowField(${r.rowId},'counterAccountId',this.value)">${accountOptionsHtml(r.counterAccountId)}</select>`}
+    </td>
   </tr>`;
 }
 
@@ -1608,16 +1634,22 @@ function renderBankPreview(){
     area.innerHTML = '<p class="empty-msg">取り込める行がありませんでした。列の形式をご確認ください。</p>';
     return;
   }
-  let html = `<div class="bulk-apply-row">
+  const autoLinked = pendingBankRows.filter(r=>r.payslipId).length;
+  let html = '';
+  if(autoLinked>0){
+    html += `<p class="hint" style="color:var(--accent);">金額がちょうど一致する給与明細を ${autoLinked}件、自動でリンクしました。間違っていれば行ごとにプルダウンで変更・解除できます。</p>`;
+  }
+  html += `<div class="bulk-apply-row">
     <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);"><input type="checkbox" onchange="toggleAllBankRows(this.checked)"> すべて選択</label>
-    <span style="font-size:12px;color:var(--muted);">選択中の行に相手科目を一括適用:</span>
+    <span style="font-size:12px;color:var(--muted);">選択中の行(給与明細にリンクしていない行のみ)に相手科目を一括適用:</span>
     <select id="bankBulkAccountSelect">${accountOptionsHtml(null)}</select>
     <button class="btn-outline btn-sm" onclick="bulkApplyCounterAccount()">適用</button>
   </div>`;
-  html += '<div class="table-wrap"><table><tr><th></th><th class="left">日付</th><th class="left">摘要</th><th class="left">金額</th><th class="left">相手科目</th></tr>';
+  html += '<div class="table-wrap"><table><tr><th></th><th class="left">日付</th><th class="left">摘要</th><th class="left">金額</th><th class="left">相手科目 / 給与明細リンク</th></tr>';
   pendingBankRows.forEach(r=>{ html += bankRowHtml(r); });
   html += '</table></div>';
-  html += `<div style="margin-top:12px;"><button class="btn-primary" onclick="registerBankRows()">相手科目が設定済みの行を登録する</button></div>`;
+  html += `<div style="margin-top:12px;"><button class="btn-primary" onclick="registerBankRows()">設定済みの行を登録する</button></div>`;
+  html += `<p class="hint" style="margin-top:8px;">給与明細にリンクした行は、給与明細タブの「支給科目」「預り金科目」で選ばれている科目を使って、給与の内訳(支給・預り金など)を含む仕訳として登録されます。</p>`;
   area.innerHTML = html;
 }
 
@@ -1626,36 +1658,65 @@ function toggleBankRowSelected(rowId, checked){
   if(r) r.selected = checked;
 }
 function toggleAllBankRows(checked){
-  pendingBankRows.forEach(r=>r.selected=checked);
+  pendingBankRows.forEach(r=>{ if(!r.payslipId) r.selected=checked; });
   renderBankPreview();
 }
 function updateBankRowField(rowId, field, value){
   const r = pendingBankRows.find(x=>x.rowId===rowId);
-  if(r) r[field] = value;
+  if(!r) return;
+  r[field] = value;
+  if(field==='payslipId'){
+    if(value){ r.counterAccountId=''; r.selected=false; } // リンクする場合は相手科目選択を使わない
+  }
+  renderBankPreview();
 }
 function bulkApplyCounterAccount(){
   const accId = document.getElementById('bankBulkAccountSelect').value;
   if(!accId){ alert('相手科目を選択してください'); return; }
-  const targets = pendingBankRows.filter(r=>r.selected);
-  if(targets.length===0){ alert('行を選択してください'); return; }
+  const targets = pendingBankRows.filter(r=>r.selected && !r.payslipId);
+  if(targets.length===0){ alert('行を選択してください(給与明細にリンクした行には使えません)'); return; }
   targets.forEach(r=>{ r.counterAccountId = accId; });
   renderBankPreview();
 }
 function registerBankRows(){
   const bankAccId = document.getElementById('bankAccountSelect').value;
   if(!bankAccId){ alert('預金口座を選択してください'); return; }
-  const ready = pendingBankRows.filter(r=>r.counterAccountId);
+  const paySourceId = document.getElementById('paySourceAccountSelect')?.value;
+  const depositId = document.getElementById('payDepositAccountSelect')?.value;
+  const ready = pendingBankRows.filter(r=>r.counterAccountId || r.payslipId);
   const skipped = pendingBankRows.length - ready.length;
-  if(ready.length===0){ alert('相手科目が設定された行がありません'); return; }
-  const ops = ready.map(r=>{
-    const amount = r.amountIn>0 ? r.amountIn : r.amountOut;
-    const payload = r.amountIn>0
-      ? { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:bankAccId, amount, tag:''}], creditLines:[{accountId:r.counterAccountId, amount, tag:''}] }
-      : { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:r.counterAccountId, amount, tag:''}], creditLines:[{accountId:bankAccId, amount, tag:''}] };
-    return { type:'set', ref: companyDoc().collection('entries').doc(), data: payload };
+  if(ready.length===0){ alert('相手科目、または給与明細のリンクが設定された行がありません'); return; }
+
+  const ops = [];
+  let payslipLinked = 0, payslipSkipped = 0;
+  ready.forEach(r=>{
+    if(r.payslipId){
+      const payslip = payslips.find(p=>p.id===r.payslipId);
+      if(!payslip || !paySourceId || !depositId){ payslipSkipped++; return; }
+      const entryData = buildPayslipJournalData(payslip, { paySourceId, depositId, paymentId: bankAccId, date: r.date });
+      if(!entryData){ payslipSkipped++; return; }
+      const entryRef = companyDoc().collection('entries').doc();
+      ops.push({ type:'set', ref: entryRef, data: entryData });
+      ops.push({ type:'update', ref: companyDoc().collection('payslips').doc(payslip.id), data:{ journalEntryId: entryRef.id } });
+      payslipLinked++;
+    } else {
+      const amount = r.amountIn>0 ? r.amountIn : r.amountOut;
+      const payload = r.amountIn>0
+        ? { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:bankAccId, amount, tag:''}], creditLines:[{accountId:r.counterAccountId, amount, tag:''}] }
+        : { date:r.date, fiscalYear:deriveFiscalYear(r.date), description:r.desc, debitLines:[{accountId:r.counterAccountId, amount, tag:''}], creditLines:[{accountId:bankAccId, amount, tag:''}] };
+      ops.push({ type:'set', ref: companyDoc().collection('entries').doc(), data: payload });
+    }
   });
+  if(ops.length===0){
+    alert('登録できる行がありませんでした。給与明細にリンクする行は、先に「給与明細」タブで支給科目・預り金科目を選んでおいてください。');
+    return;
+  }
   commitInChunks(ops).then(()=>{
-    alert(`${ready.length}件を登録しました${skipped?`(相手科目未設定のため ${skipped}件は未登録)`:''}`);
+    let msg = `${ready.length - payslipSkipped}件を登録しました`;
+    if(payslipLinked) msg += `(うち給与明細リンク ${payslipLinked}件)`;
+    if(skipped) msg += `\n相手科目・リンクとも未設定のため ${skipped}件は未登録`;
+    if(payslipSkipped) msg += `\n給与明細リンクのうち ${payslipSkipped}件は、支給科目・預り金科目が未設定のためスキップしました(給与明細タブで設定してからもう一度お試しください)`;
+    alert(msg);
     document.getElementById('bankPasteArea').value = '';
     pendingBankRows = [];
     document.getElementById('bankPreviewArea').innerHTML = '';
@@ -2850,23 +2911,28 @@ function collectPayslipPayload(){
     payItems, deductItems, grossTotal, deductTotal, netPay
   };
 }
+// payslip(給与明細のデータ)と使用する科目から、仕訳のたたき台を組み立てる共通処理
+function buildPayslipJournalData(payslip, {paySourceId, depositId, paymentId, date}){
+  const payDate = date || payslip.payDate || (payslip.yearMonth ? payslip.yearMonth+'-25' : new Date().toISOString().slice(0,10));
+  if(!paySourceId || !depositId || !paymentId) return null;
+  if(!payslip.grossTotal || payslip.grossTotal<=0) return null;
+  return {
+    date: payDate, fiscalYear: deriveFiscalYear(payDate),
+    description: `${payslip.employeeName} ${payslip.yearMonth} 給与`,
+    debitLines: [{accountId: paySourceId, amount: payslip.grossTotal, tag: payslip.employeeName}],
+    creditLines: [
+      ...payslip.deductItems.map(l=>({accountId: depositId, amount: l.amount, tag: l.label, subTag: monthLabel(payslip.yearMonth)})),
+      ...(payslip.netPay>0 ? [{accountId: paymentId, amount: payslip.netPay, tag: payslip.employeeName}] : [])
+    ]
+  };
+}
 function buildJournalFromPayslip(payload){
-  const employee = employees.find(e=>e.id===payload.employeeId);
   const paySourceId = document.getElementById('paySourceAccountSelect').value;
   const depositId = document.getElementById('payDepositAccountSelect').value;
   const paymentId = document.getElementById('payPaymentAccountSelect').value;
-  const payDate = payload.payDate || (payload.yearMonth ? payload.yearMonth+'-25' : new Date().toISOString().slice(0,10));
   if(!paySourceId || !depositId || !paymentId){ alert('仕訳作成用の科目(支給科目・預り金科目・支払口座)をすべて選択してください'); return null; }
   if(payload.grossTotal<=0){ alert('支給額を入力してください'); return null; }
-  return {
-    date: payDate, fiscalYear: deriveFiscalYear(payDate),
-    description: `${payload.employeeName} ${payload.yearMonth} 給与`,
-    debitLines: [{accountId: paySourceId, amount: payload.grossTotal, tag: payload.employeeName}],
-    creditLines: [
-      ...payload.deductItems.map(l=>({accountId: depositId, amount: l.amount, tag: l.label, subTag: monthLabel(payload.yearMonth)})),
-      ...(payload.netPay>0 ? [{accountId: paymentId, amount: payload.netPay, tag: payload.employeeName}] : [])
-    ]
-  };
+  return buildPayslipJournalData(payload, {paySourceId, depositId, paymentId, date: payload.payDate});
 }
 function savePayslip(){
   const payload = collectPayslipPayload();
