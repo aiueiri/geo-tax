@@ -3280,5 +3280,187 @@ renderPayLines('deduct');
 document.getElementById('payslipYearMonth').value = new Date().toISOString().slice(0,7);
 document.getElementById('payslipPayDate').valueAsDate = new Date();
 </script>
+  <!-- ===== 法人税申告書 転記用タブ(アドオン) =====
+  使い方: 会計帳簿のHTMLファイルを開き、最後の </body> の直前にこのブロック全体を貼り付けて保存するだけです。
+  既存コードの書き換えは不要です(タブ・画面・処理を自動で追加します)。 -->
+<script>
+(function(){
+  const FIELDS = [
+    ['entertain','交際費等の損金不算入額(加算)'],
+    ['depExcess','減価償却の償却超過額(加算)'],
+    ['otherAdd','その他の加算'],
+    ['otherSub','減算(前期事業税の認容など)'],
+    ['lossCF','繰越欠損金の当期控除額'],
+    ['withTax','所得税額控除(預金利息の源泉税など)'],
+    ['interim','中間納付済みの法人税'],
+    ['interimLocal','中間納付済みの地方法人税']
+  ];
+  document.querySelector('nav.tabs').insertAdjacentHTML('beforeend',
+    '<button class="tab-btn" data-tab="tab-taxret" onclick="switchTab(\'tab-taxret\')">法人税申告書</button>');
+  document.querySelector('main').insertAdjacentHTML('beforeend', `
+  <div class="tab-panel" id="tab-taxret">
+    <div class="card">
+      <div class="toolbar"><h3 style="margin:0;flex:1;">法人税申告書 転記用データ</h3>
+        <label>事業年度:</label><select id="trYearSelect" onchange="loadTaxRetAdj()"></select></div>
+      <p class="hint">帳簿の数字から、決算書・別表四・別表五(一)・法人税額・消費税・勘定科目内訳明細書用の数字を自動で出します。帳簿に出てこない申告調整(下の欄)だけ手入力してください。入力内容は事業年度ごとに保存されます。事業税・住民税は都道府県・市区町村の様式で別途計算するためここでは算出しません。</p>
+      <div class="form-row">
+        <label>法人の区分<select id="tr_small"><option value="1">中小法人(資本金1億円以下・軽減税率15%を適用)</option><option value="0">それ以外(一律23.2%)</option></select></label>
+        ${FIELDS.map(([k,l])=>`<label>${l}<input type="number" id="tr_${k}" placeholder="0"></label>`).join('')}
+      </div>
+      <div class="toolbar">
+        <button class="btn-primary" onclick="renderTaxReturn(true)">保存して計算する</button>
+        <button class="btn-outline" onclick="copyTaxReturnText()">全体をテキストでコピー</button>
+      </div>
+      <div id="taxRetArea"></div>
+    </div>
+  </div>`);
+
+  const _sw = window.switchTab;
+  window.switchTab = function(id){ _sw(id); if(id==='tab-taxret') window.loadTaxRetAdj(); };
+
+  const num = id => parseFloat(document.getElementById(id).value)||0;
+  const fl = (v,u)=>Math.floor(v/u)*u;
+  let lastText = '';
+
+  function pl(year){
+    const f = entries.filter(e=>e.fiscalYear===year);
+    const sum = a=>{let d=0,c=0;f.forEach(e=>{e.debitLines.forEach(l=>{if(l.accountId===a.id)d+=l.amount;});e.creditLines.forEach(l=>{if(l.accountId===a.id)c+=l.amount;});});return {d,c};};
+    const r={rev:0,exp:0,tax:0,revRows:[],expRows:[],entertainAcc:0};
+    accounts.forEach(a=>{
+      const s=sum(a);
+      if(a.category==='revenue'){const v=s.c-s.d; if(v){r.rev+=v;r.revRows.push([a.name,v]);}}
+      else if(a.category==='expense'){
+        const v=s.d-s.c; if(!v) return;
+        if(isCorpTaxAccount(a)) r.tax+=v; else {r.exp+=v; r.expRows.push([a.name,v]); if(a.name.includes('交際'))r.entertainAcc+=v;}
+      }
+    });
+    r.pretax=r.rev-r.exp; r.net=r.pretax-r.tax; return r;
+  }
+  function balances(year){
+    const oy=openingFiscalYear();
+    const f=entries.filter(e=>e.fiscalYear&&e.fiscalYear<=year&&(!oy||e.fiscalYear>=oy));
+    return accounts.filter(a=>isBSCategory(a.category)).map(a=>{
+      const dn=NORMAL_SIDE[a.category]==='debit'; let bal=0; const tags={};
+      f.forEach(e=>['debitLines','creditLines'].forEach(s=>e[s].forEach(l=>{
+        if(l.accountId!==a.id) return;
+        const sg=((s==='debitLines')===dn)?1:-1; bal+=sg*l.amount;
+        const t=l.tag||'(補助なし)'; tags[t]=(tags[t]||0)+sg*l.amount;
+      })));
+      if(oy&&year>=oy){const ob=openingBalanceFor(a.id); if(ob){bal+=ob; tags['(期首残高)']=(tags['(期首残高)']||0)+ob;}}
+      return {a,bal,tags};
+    });
+  }
+  function months(year){
+    const p=fiscalPeriods.find(x=>x.number===year); if(!p) return 12;
+    const s=new Date(p.start), e=new Date(p.end);
+    return Math.min(12,Math.max(1,(e.getFullYear()-s.getFullYear())*12+e.getMonth()-s.getMonth()+1));
+  }
+
+  function build(year){
+    const p=pl(year), bs=balances(year), S=[];
+    const adj={small:document.getElementById('tr_small').value, ...Object.fromEntries(FIELDS.map(([k])=>[k,num('tr_'+k)]))};
+
+    // 1) 損益計算書
+    S.push({title:'【決算書】損益計算書', rows:[
+      ...p.revRows.map(([n,v])=>['収益: '+n,v]), ['収益合計',p.rev],
+      ...p.expRows.map(([n,v])=>['費用: '+n,v]), ['費用合計',p.exp],
+      ['税引前当期純利益',p.pretax], ['法人税、住民税及び事業税(法人税等)',p.tax], ['当期純利益',p.net]]});
+
+    // 2) 貸借対照表
+    const py=priorYearsNetIncome(year), cy=netIncomeThroughYear(year)-py;
+    const grp=c=>bs.filter(x=>x.a.category===c&&x.bal!==0).map(x=>[categoryLabels[c]+': '+x.a.name,x.bal]);
+    const tot=c=>bs.filter(x=>x.a.category===c).reduce((s,x)=>s+x.bal,0);
+    const eqTotal=tot('equity')+py+cy;
+    S.push({title:'【決算書】貸借対照表(期末)', rows:[
+      ...grp('asset'),['資産合計',tot('asset')], ...grp('liability'),['負債合計',tot('liability')], ...grp('equity'),
+      ['繰越損益(前期以前・自動)',py],['当期純損益(自動)',cy],['純資産合計',eqTotal],['負債・純資産合計',tot('liability')+eqTotal]]});
+
+    // 3) 別表四
+    const addTax=p.tax;
+    const pre=p.net+addTax+adj.entertain+adj.depExcess+adj.otherAdd-adj.otherSub;
+    const inc=Math.max(0,pre-adj.lossCF), taxable=fl(inc,1000);
+    S.push({title:'【別表四】所得の金額の計算', rows:[
+      ['1 当期利益又は当期欠損の額(総額)',p.net],
+      ['加算: 損金経理をした法人税、住民税及び事業税',addTax],
+      ['加算: 交際費等の損金不算入額',adj.entertain],['加算: 減価償却の償却超過額',adj.depExcess],['加算: その他',adj.otherAdd],
+      ['減算: 認容事業税など',adj.otherSub],
+      ['仮計(所得金額又は欠損金額)',pre],['繰越欠損金の当期控除額',adj.lossCF],
+      ['差引所得金額',inc],['申告所得金額(1,000円未満切捨て)',taxable]],
+      note: p.entertainAcc? `参考: 帳簿上の交際費は ${fmtYen(p.entertainAcc)}。中小法人は年800万円まで損金算入可(接待飲食費の50%との有利な方を選択)。`:''});
+
+    // 4) 法人税額
+    const m=months(year), lim=8000000*m/12;
+    let ct = adj.small==='1' ? Math.min(taxable,lim)*0.15+Math.max(0,taxable-lim)*0.232 : taxable*0.232;
+    ct=fl(ct,100);
+    const net_ct=fl(Math.max(0,ct-adj.withTax),100);
+    const local=fl(fl(ct,1000)*0.103,100);
+    S.push({title:'【別表一】法人税額・地方法人税額(概算)', rows:[
+      ['事業年度の月数',m],['課税所得金額',taxable],['法人税額',ct],['所得税額控除',adj.withTax],
+      ['差引法人税額',net_ct],['中間納付額',adj.interim],['確定法人税額(納付額。マイナスは還付)',net_ct-adj.interim],
+      ['地方法人税額(課税標準法人税額×10.3%)',local],['中間納付額(地方法人税)',adj.interimLocal],['確定地方法人税額',local-adj.interimLocal]],
+      note:'税率は中小法人の軽減15%(年800万円以下部分)・23.2%・地方法人税10.3%で計算。軽減税率の適用期限・最新税率は国税庁の情報で確認してください。'});
+
+    // 5) 別表五(一)
+    const cap=bs.filter(x=>x.a.name==='資本金'||x.a.name==='資本準備金').reduce((s,x)=>s+x.bal,0);
+    const unpaid=bs.filter(x=>x.a.name.startsWith('未払法人税')).reduce((s,x)=>s+x.bal,0);
+    S.push({title:'【別表五(一)】利益積立金額・資本金等の額(期末現在)', rows:[
+      ['資本金等の額(資本金+資本準備金)',cap],['純資産合計',eqTotal],['利益積立金額(純資産−資本金等・簡易)',eqTotal-cap],
+      ['未払法人税等(帳簿残高)',unpaid]],
+      note:'別表五(一)は期首残高との増減で記載します。期首の利益積立金額は前期申告書の期末欄と照合してください。未納法人税等は別表五(二)とあわせて記載します。'});
+
+    // 6) 消費税
+    const sm=computeTaxableAmounts(year), method=document.getElementById('taxMethod').value, cat=document.getElementById('taxSimplifiedCategory').value;
+    const st=sm.sales['10']*10/110+sm.sales['8']*8/108, pt=sm.purchase['10']*10/110+sm.purchase['8']*8/108;
+    const payable=method==='simplified'?st*(1-(SIMPLIFIED_RATES[cat]||0.4)):st-pt;
+    S.push({title:'【消費税】(税区分を付けた仕訳のみ集計)', rows:[
+      ['課税売上高(税込・10%)',sm.sales['10']],['課税売上高(税込・8%)',sm.sales['8']],['課税売上に係る消費税額',Math.round(st)],
+      ...(method==='general'?[['課税仕入高(税込・10%)',sm.purchase['10']],['課税仕入高(税込・8%)',sm.purchase['8']],['課税仕入に係る消費税額',Math.round(pt)]]:[['簡易課税 第'+cat+'種 みなし仕入率',Math.round((SIMPLIFIED_RATES[cat]||0.4)*100)+'%']]),
+      ['差引消費税額(概算)',Math.round(payable)],['うち国税(78%)',Math.round(payable*0.78)],['うち地方消費税(22%)',Math.round(payable*0.22)]]});
+
+    // 7) 勘定科目内訳明細書用
+    const det=[];
+    bs.filter(x=>x.a.category!=='equity'&&Object.values(x.tags).some(v=>v!==0)).forEach(x=>{
+      det.push([`■ ${x.a.name}(合計)`,x.bal]);
+      Object.entries(x.tags).filter(([,v])=>v!==0).sort((a,b)=>b[1]-a[1]).forEach(([t,v])=>det.push(['　'+t,v]));
+    });
+    S.push({title:'【勘定科目内訳明細書】期末残高の補助別内訳', rows:det.length?det:[['(補助の入った残高がありません)','']]});
+    return S;
+  }
+
+  window.loadTaxRetAdj = function(){
+    const sel=document.getElementById('trYearSelect'), bsSel=document.getElementById('bsYearSelect');
+    if(sel.options.length!==bsSel.options.length) sel.innerHTML=bsSel.innerHTML;
+    if(!sel.value) sel.value=bsSel.value;
+    if(!sel.value){ document.getElementById('taxRetArea').innerHTML='<p class="empty-msg">仕訳が登録された事業年度がありません</p>'; return; }
+    companyDoc().collection('meta').doc('taxReturn_'+sel.value).get().then(s=>{
+      const d=s.exists?s.data():{};
+      document.getElementById('tr_small').value=d.small||'1';
+      FIELDS.forEach(([k])=>{document.getElementById('tr_'+k).value=d[k]||'';});
+      window.renderTaxReturn(false);
+    }).catch(reportError);
+  };
+
+  window.renderTaxReturn = function(save){
+    const year=document.getElementById('trYearSelect').value; if(!year) return;
+    if(save){
+      const d={small:document.getElementById('tr_small').value}; FIELDS.forEach(([k])=>{d[k]=num('tr_'+k);});
+      companyDoc().collection('meta').doc('taxReturn_'+year).set(d).catch(reportError);
+    }
+    const S=build(year); let html='', text=`法人税申告書 転記用データ(${yearLabel(year)})\n`;
+    const f=v=>typeof v==='number'?fmtYen(v):escapeHtml(v);
+    S.forEach(s=>{
+      html+=`<h3 style="margin:22px 0 8px;">${s.title}</h3><div class="table-wrap"><table>`+
+        s.rows.map(r=>`<tr><td class="left">${escapeHtml(r[0])}</td><td>${f(r[1])}</td></tr>`).join('')+'</table></div>'+
+        (s.note?`<p class="hint" style="margin-top:6px;">${escapeHtml(s.note)}</p>`:'');
+      text+=`\n${s.title}\n`+s.rows.map(r=>`${r[0]}\t${typeof r[1]==='number'?r[1]:r[1]}`).join('\n')+'\n';
+    });
+    document.getElementById('taxRetArea').innerHTML=html; lastText=text;
+  };
+  window.copyTaxReturnText = function(){
+    if(!lastText){ alert('先に計算してください'); return; }
+    navigator.clipboard.writeText(lastText).then(()=>alert('コピーしました(Excelに貼り付けできます)'));
+  };
+})();
+</script>
 </body>
 </html>
